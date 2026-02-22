@@ -58,6 +58,7 @@ impl TemplateRenderer {
             "matrix" => "<h3>{{ title }}</h3><p>{{ description | truncate(500) }}</p><p><a href=\"{{ url }}\">Leer más</a></p>".to_string(),
             "bluesky" => "{{ title | truncate(250) }}\n\n{{ url }}".to_string(),
             "threads" => "{{ title }}\n\n{{ description | truncate(450) }}\n\n{{ url }}".to_string(),
+            "discord" => "**{{ title }}**\n\n{{ description | truncate(400) }}\n\n🔗 {{ url }}".to_string(),
             "openobserve" => "Feed: {{ title }}\nDescription: {{ description }}\nURL: {{ url }}".to_string(),
             _ => "{{ title }}\n\n{{ description }}\n\n{{ url }}".to_string(),
         }

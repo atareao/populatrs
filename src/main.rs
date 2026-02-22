@@ -436,6 +436,7 @@ fn get_publisher_type_name(config: &PublisherConfig) -> &'static str {
         PublisherConfig::Matrix { .. } => "Matrix",
         PublisherConfig::Bluesky { .. } => "Bluesky",
         PublisherConfig::Threads { .. } => "Threads",
+        PublisherConfig::Discord { .. } => "Discord",
     }
 }
 

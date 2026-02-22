@@ -89,16 +89,17 @@ _Automated RSS feed publisher for multiple social platforms with intelligent cac
 
 <div align="center">
 
-| Platform    | Logo                                                                                                          | Status    | Auth Method    |
-| ----------- | ------------------------------------------------------------------------------------------------------------- | --------- | -------------- |
-| Telegram    | <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" width="24">                  | ✅ Active | Bot Token      |
-| X (Twitter) | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ce/X_logo_2023.svg" width="24">                    | ✅ Active | OAuth 2.0 PKCE |
-| Mastodon    | <img src="https://upload.wikimedia.org/wikipedia/commons/4/48/Mastodon_Logotype_%28Simple%29.svg" width="24"> | ✅ Active | Bearer Token   |
-| LinkedIn    | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" width="24">         | ✅ Active | OAuth 2.0      |
-| Matrix      | <img src="https://upload.wikimedia.org/wikipedia/commons/9/9d/Matrix_logo.svg" width="24">                    | ✅ Active | Access Token   |
-| Bluesky     | <img src="https://upload.wikimedia.org/wikipedia/commons/7/7a/Bluesky_Logo.svg" width="24">                   | ✅ Active | App Password   |
-| Threads     | 🧵                                                                                                            | ✅ Active | Access Token   |
-| OpenObserve | 📊                                                                                                            | ✅ Active | API Key        |
+| Platform    | Logo                                                                                                                                      | Status    | Auth Method    |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------------- |
+| Telegram    | <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" width="24">                                              | ✅ Active | Bot Token      |
+| X (Twitter) | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ce/X_logo_2023.svg" width="24">                                                | ✅ Active | OAuth 2.0 PKCE |
+| Mastodon    | <img src="https://upload.wikimedia.org/wikipedia/commons/4/48/Mastodon_Logotype_%28Simple%29.svg" width="24">                             | ✅ Active | Bearer Token   |
+| LinkedIn    | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" width="24">                                     | ✅ Active | OAuth 2.0      |
+| Matrix      | <img src="https://upload.wikimedia.org/wikipedia/commons/9/9d/Matrix_logo.svg" width="24">                                                | ✅ Active | Access Token   |
+| Discord     | <img src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6ca814282eca7172c6_icon_clyde_white_RGB.svg" width="24"> | ✅ Active | Webhook URL    |
+| Bluesky     | <img src="https://upload.wikimedia.org/wikipedia/commons/7/7a/Bluesky_Logo.svg" width="24">                                               | ✅ Active | App Password   |
+| Threads     | 🧵                                                                                                                                        | ✅ Active | Access Token   |
+| OpenObserve | 📊                                                                                                                                        | ✅ Active | API Key        |
 
 </div>
 
@@ -300,6 +301,30 @@ sudo cp target/release/populatrs /usr/local/bin/
   }
 }
 ```
+
+</details>
+
+<details>
+<summary><strong>💬 Discord</strong></summary>
+
+Use a Discord webhook URL for simple setup:
+
+```json
+{
+  "type": "Discord",
+  "config": {
+    "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "template": "**{{ title }}**\\n\\n{{ description | truncate(400) }}\\n\\n🔗 {{ url }}"
+  }
+}
+```
+
+**Setup Instructions:**
+
+1. Go to your Discord server settings
+2. Navigate to Integrations → Webhooks
+3. Create a new webhook for your desired channel
+4. Copy the webhook URL and use it in the configuration
 
 </details>
 

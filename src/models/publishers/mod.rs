@@ -12,6 +12,7 @@ pub trait Publisher: Send + Sync {
 }
 
 pub mod bluesky;
+pub mod discord;
 pub mod linkedin;
 pub mod manager;
 pub mod mastodon;
@@ -22,6 +23,7 @@ pub mod threads;
 pub mod x;
 
 pub use bluesky::BlueskyPublisher;
+pub use discord::DiscordPublisher;
 pub use linkedin::LinkedInPublisher;
 pub use manager::PublisherManager;
 pub use mastodon::MastodonPublisher;

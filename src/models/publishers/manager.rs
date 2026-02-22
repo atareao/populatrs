@@ -1,6 +1,6 @@
 use super::{
-    BlueskyPublisher, LinkedInPublisher, MastodonPublisher, MatrixPublisher, OpenObservePublisher,
-    Publisher, TelegramPublisher, ThreadsPublisher, XPublisher,
+    BlueskyPublisher, DiscordPublisher, LinkedInPublisher, MastodonPublisher, MatrixPublisher,
+    OpenObservePublisher, Publisher, TelegramPublisher, ThreadsPublisher, XPublisher,
 };
 use crate::models::{Post, PublisherConfig, TemplateRenderer};
 use anyhow::Result;
@@ -161,6 +161,19 @@ pub fn create_publisher_with_config_path(
                 id,
                 access_token.clone(),
                 user_id.clone(),
+                template_str,
+            )))
+        }
+        PublisherConfig::Discord {
+            webhook_url,
+            template,
+        } => {
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| TemplateRenderer::get_default_template("discord"));
+            Ok(Box::new(DiscordPublisher::new(
+                id,
+                webhook_url.clone(),
                 template_str,
             )))
         }

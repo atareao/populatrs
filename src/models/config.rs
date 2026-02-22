@@ -100,6 +100,10 @@ pub enum PublisherConfig {
         user_id: String,
         template: Option<String>,
     },
+    Discord {
+        webhook_url: String,
+        template: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

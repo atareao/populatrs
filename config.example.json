@@ -139,6 +139,13 @@
                 "user_id": "YOUR_THREADS_USER_ID",
                 "template": "{{ title }}\n\n{{ description | truncate(450) }}\n\n{{ url }}"
             }
+        },
+        "discord-main": {
+            "type": "Discord",
+            "config": {
+                "webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+                "template": "**{{ title }}**\n\n{{ description | truncate(400) }}\n\n🔗 {{ url }}"
+            }
         }
     },
     "schedule": {
