@@ -1,0 +1,153 @@
+{
+    "youtube": {
+        "api_key": "YOUR_YOUTUBE_API_KEY",
+        "default_max_results": 10
+    },
+    "feeds": [
+        {
+            "id": "atareao-youtube-api",
+            "type": "Youtube",
+            "config": {
+                "channel_id": "UCP8dTCaLNJFxfklb_GNqe6A"
+            },
+            "name": "Canal de YouTube de Atareao (API)",
+            "enabled": true,
+            "publishers": [
+                "matrix-territoriolinux",
+                "openobserve-territoriolinux"
+            ],
+            "check_interval_minutes": 60,
+            "max_retries": 3,
+            "retry_delay_seconds": 2
+        },
+        {
+            "id": "atareao-youtube-playlist",
+            "type": "Youtube",
+            "config": {
+                "playlist_id": "PLjABykPy-panel-example",
+                "max_results": 5
+            },
+            "name": "Playlist específica de YouTube",
+            "enabled": true,
+            "publishers": [
+                "telegram-topic"
+            ],
+            "check_interval_minutes": 30,
+            "max_retries": 3,
+            "retry_delay_seconds": 2
+        },
+        {
+            "id": "atareao-blog",
+            "type": "Rss",
+            "config": {
+                "url": "https://atareao.es/feed/"
+            },
+            "name": "Blog de Atareao",
+            "enabled": true,
+            "publishers": [
+                "matrix-territoriolinux",
+                "openobserve-territoriolinux"
+            ],
+            "check_interval_minutes": 60,
+            "max_retries": 3,
+            "retry_delay_seconds": 2
+        }
+    ],
+    "publishers": {
+        "telegram-main": {
+            "type": "Telegram",
+            "config": {
+                "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+                "chat_id": "YOUR_CHAT_ID",
+                "parse_mode": "HTML",
+                "template": "**{{ title }}**\n\n{{ description | truncate(480) }}\n\n🔗 [Leer más]({{ url }})"
+            }
+        },
+        "telegram-topic": {
+            "type": "Telegram",
+            "config": {
+                "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+                "chat_id": "YOUR_CHAT_ID",
+                "parse_mode": "HTML",
+                "message_thread_id": "123",
+                "template": "🎯 **{{ title }}** 🎯\n\n{{ description | truncate(400) }}\n\n🔗 {{ url }}"
+            }
+        },
+        "x-main": {
+            "type": "X",
+            "config": {
+                "client_id": "YOUR_X_CLIENT_ID",
+                "client_secret": "YOUR_X_CLIENT_SECRET",
+                "redirect_uri": "http://localhost:8080/callback",
+                "access_token": null,
+                "refresh_token": null,
+                "template": "{{ title | truncate(240) }}\n\n{{ url }}"
+            }
+        },
+        "mastodon-main": {
+            "type": "Mastodon",
+            "config": {
+                "server_url": "https://mastodon.social",
+                "access_token": "YOUR_MASTODON_ACCESS_TOKEN",
+                "template": "{{ title }}\n\n{{ description | truncate(400) }}\n\n{{ url }}"
+            }
+        },
+        "linkedin-main": {
+            "type": "LinkedIn",
+            "config": {
+                "client_id": "YOUR_LINKEDIN_CLIENT_ID",
+                "client_secret": "YOUR_LINKEDIN_CLIENT_SECRET",
+                "redirect_uri": "http://localhost:8080/callback",
+                "access_token": null,
+                "refresh_token": null,
+                "user_id": null,
+                "organization_id": null,
+                "template": "{{ title }}\n\n{{ description | truncate(700) }}\n\nLeer más: {{ url }}"
+            }
+        },
+        "openobserve-territoriolinux": {
+            "type": "OpenObserve",
+            "config": {
+                "url": "https://your-openobserve-instance.com",
+                "organization": "default",
+                "stream_name": "rss-feeds",
+                "access_token": "YOUR_OPENOBSERVE_ACCESS_TOKEN",
+                "template": "Feed: {{ title }}\nDescription: {{ description }}\nURL: {{ url }}"
+            }
+        },
+        "matrix-territoriolinux": {
+            "type": "Matrix",
+            "config": {
+                "homeserver_url": "https://matrix.yourdomain.com",
+                "access_token": "YOUR_MATRIX_ACCESS_TOKEN",
+                "room_id": "!your-room-id:matrix.yourdomain.com",
+                "template": "<h3>{{ title }}</h3><p>{{ description | truncate(500) }}</p><p><a href=\"{{ url }}\">Leer más</a></p>"
+            }
+        },
+        "bluesky-main": {
+            "type": "Bluesky",
+            "config": {
+                "handle": "your-handle.bsky.social",
+                "password": "YOUR_BLUESKY_PASSWORD",
+                "pds_url": "https://bsky.social",
+                "template": "{{ title | truncate(250) }}\n\n{{ url }}"
+            }
+        },
+        "threads-main": {
+            "type": "Threads",
+            "config": {
+                "access_token": "YOUR_THREADS_ACCESS_TOKEN",
+                "user_id": "YOUR_THREADS_USER_ID",
+                "template": "{{ title }}\n\n{{ description | truncate(450) }}\n\n{{ url }}"
+            }
+        }
+    },
+    "schedule": {
+        "default_interval_minutes": 60,
+        "timezone": "UTC"
+    },
+    "storage": {
+        "data_dir": "./data",
+        "published_posts_file": "published_posts.json"
+    }
+}

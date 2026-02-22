@@ -1,0 +1,16 @@
+services:
+  populatrs:
+    image: atareao/populatrs
+    container_name: populatrs
+    restart: unless-stopped
+    init: true
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+    environment:
+      - RUST_LOG=info
+    # Optional: uncomment to run in one-shot mode
+    # command: ["populatrs", "--config", "/app/config.json", "--once"]
+    
+    # Optional: uncomment for dry-run mode
+    # command: ["populatrs", "--config", "/app/config.json", "--dry-run"]
