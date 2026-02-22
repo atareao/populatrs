@@ -1,139 +1,221 @@
-# RSS Populatrs - Publicador Automático de Feeds
+# 🚀 Populatrs - RSS Feed Publisher
 
-Aplicación en Rust que procesa feeds RSS y videos de YouTube, publicándolos automáticamente en múltiples plataformas sociales con templating personalizable, reintentos robustos y optimizaciones HTTP.
+<div align="center">
 
-## ✨ **Funcionalidades Principales**
+[![Build Status](https://img.shields.io/github/actions/workflow/status/populatrs/populatrs/ci.yml?branch=main&style=for-the-badge)](https://github.com/populatrs/populatrs/actions)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange.svg?style=for-the-badge)](https://www.rust-lang.org)
+[![Docker](https://img.shields.io/badge/docker-supported-blue.svg?style=for-the-badge&logo=docker)](https://hub.docker.com/r/populatrs/populatrs)
+[![Release](https://img.shields.io/github/v/release/populatrs/populatrs?style=for-the-badge)](https://github.com/populatrs/populatrs/releases)
 
-### 📡 **Tipos de Feeds**
+_Automated RSS feed publisher for multiple social platforms with intelligent caching and robust retry mechanisms_
 
-- **RSS/Atom**: Feeds tradicionales con soporte completo
-- **YouTube API**: Integración directa con la API de YouTube v3
-  - Por canal ID
-  - Por playlist ID
-  - Por username de canal
-  - Extracción automática de título, descripción y metadatos
+[Features](#-features) • [Quick Start](#-quick-start) • [Installation](#-installation) • [Configuration](#-configuration) • [Documentation](#-documentation)
 
-### 🎯 **8 Plataformas Soportadas**
+</div>
 
-- **Telegram**: Con soporte para topics específicos
-- **X (Twitter)**: Usando API v2 con OAuth 2.0 PKCE
-- **Mastodon**: Cualquier instancia
-- **LinkedIn**: Publicaciones personales con OAuth 2.0
-- **OpenObserve**: Logs estructurados
-- **Matrix**: Salas con formato HTML
-- **Bluesky**: Red social descentralizada
-- **Threads**: Meta/Facebook
+---
 
-### 🔐 **Autenticación OAuth 2.0**
+## 📋 Table of Contents
 
-- **LinkedIn OAuth 2.0**: Setup interactivo completo con CLI
-- **X (Twitter) OAuth 2.0 PKCE**: Setup seguro con PKCE flow
-- **Detección automática**: Usuario vs Organización en LinkedIn
-- **Refresh automático**: Los tokens se renuevan automáticamente
-- **CLI interactivo**: Commands fáciles para configurar OAuth
+- [Features](#-features)
+- [Supported Platforms](#-supported-platforms)
+- [Quick Start](#-quick-start)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [OAuth 2.0 Setup](#-oauth-20-setup)
+- [Template System](#-template-system)
+- [HTTP Optimizations](#-http-optimizations)
+- [Docker Usage](#-docker-usage)
+- [CLI Commands](#-cli-commands)
+- [Monitoring](#-monitoring)
+- [Contributing](#-contributing)
+- [License](#-license)
 
-### 🎨 **Sistema de Plantillas (Jinja2)**
+## ✨ Features
 
-- **Filtros personalizados**: `truncate`, `word_limit`, `strip_html`
-- **Variables disponibles**: `{{ title }}`, `{{ description }}`, `{{ url }}`
-- **Plantillas por plataforma**: Control total sobre formato y contenido
+### 📡 Multi-Source Feed Processing
 
-### ⚡ **Optimizaciones y Robustez**
+- **RSS/Atom**: Complete support for RSS 2.0 and Atom feeds
+- **YouTube API v3**: Direct integration with YouTube Data API
+  - Channel feeds by ID, username or custom URL
+  - Playlist monitoring
+  - Automatic metadata extraction
+- **Smart ordering**: Posts published chronologically (oldest to newest)
 
-- **Cache HTTP**: ETag y If-None-Match para reducir descargas
-- **Reintentos**: Backoff exponencial configurable
-- **Límite de posts**: Solo los 2 más recientes por feed
-- **Detección de cambios**: Hash MD5 para evitar reprocesamiento
+### 🎯 8 Publishing Platforms
 
-## 🚀 **Instalación y Uso**
+| Platform        | Auth Method    | Features                                |
+| --------------- | -------------- | --------------------------------------- |
+| **Telegram**    | Bot Token      | Topics, HTML formatting, thread support |
+| **X (Twitter)** | OAuth 2.0 PKCE | Character limits, media support         |
+| **Mastodon**    | Bearer Token   | Any instance, rich formatting           |
+| **LinkedIn**    | OAuth 2.0      | Personal/Organization posts             |
+| **Matrix**      | Access Token   | HTML messages, room targeting           |
+| **Bluesky**     | App Password   | Decentralized posting                   |
+| **Threads**     | Access Token   | Meta's text platform                    |
+| **OpenObserve** | API Key        | Structured logging                      |
 
-### Prerrequisitos
+### 🔐 Advanced OAuth 2.0 Support
 
-```bash
-# Rust (recomendado: rustup)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+- **Interactive CLI setup** for LinkedIn & X/Twitter
+- **PKCE flow** for enhanced security (X/Twitter)
+- **Automatic token refresh** with persistent storage
+- **Organization detection** for LinkedIn business accounts
 
-# Dependencias del sistema (Ubuntu/Debian)
-sudo apt update && sudo apt install -y build-essential pkg-config libssl-dev
+### ⚡ Performance & Reliability
+
+- **HTTP Caching**: ETag, If-None-Match, Last-Modified headers
+- **Content Deduplication**: MD5 hashing for change detection
+- **Exponential Backoff**: Configurable retry mechanisms
+- **Rate Limiting**: Respectful API usage patterns
+- **Concurrent Publishing**: Parallel execution across platforms
+
+### 🎨 Advanced Template Engine (Jinja2)
+
+```jinja2
+{{ title | truncate(240) }}
+
+{{ description | strip_html | truncate(400) }}
+
+🔗 {{ url }}
+#RSS #Automation
 ```
 
-### Compilación
+**Available Filters:** `truncate`, `word_limit`, `strip_html`  
+**Variables:** `title`, `description`, `url`, `published`, `feed_id`
 
-cp config.example.json config.json
+## 🏗 Supported Platforms
 
-# Edita config.json con tus configuraciones
+<div align="center">
 
-````
+| Platform    | Logo                                                                                                          | Status    | Auth Method    |
+| ----------- | ------------------------------------------------------------------------------------------------------------- | --------- | -------------- |
+| Telegram    | <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" width="24">                  | ✅ Active | Bot Token      |
+| X (Twitter) | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ce/X_logo_2023.svg" width="24">                    | ✅ Active | OAuth 2.0 PKCE |
+| Mastodon    | <img src="https://upload.wikimedia.org/wikipedia/commons/4/48/Mastodon_Logotype_%28Simple%29.svg" width="24"> | ✅ Active | Bearer Token   |
+| LinkedIn    | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" width="24">         | ✅ Active | OAuth 2.0      |
+| Matrix      | <img src="https://upload.wikimedia.org/wikipedia/commons/9/9d/Matrix_logo.svg" width="24">                    | ✅ Active | Access Token   |
+| Bluesky     | <img src="https://upload.wikimedia.org/wikipedia/commons/7/7a/Bluesky_Logo.svg" width="24">                   | ✅ Active | App Password   |
+| Threads     | 🧵                                                                                                            | ✅ Active | Access Token   |
+| OpenObserve | 📊                                                                                                            | ✅ Active | API Key        |
 
-3. Construye y ejecuta con Docker Compose:
+</div>
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- **Rust 1.70+** ([Install Rust](https://rustup.rs/))
+- **System dependencies**:
+
+  ```bash
+  # Ubuntu/Debian
+  sudo apt update && sudo apt install -y build-essential pkg-config libssl-dev
+
+  # macOS
+  brew install openssl pkg-config
+  ```
+
+### 1. Download & Build
 
 ```bash
-docker-compose up -d
-````
-
-### Compilación Manual
-
-1. Asegúrate de tener Rust instalado:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-2. Clona y compila:
-
-```bash
-git clone <repository-url>
+git clone https://github.com/yourusername/populatrs.git
 cd populatrs
 cargo build --release
 ```
 
-3. **Setup OAuth interactivo** (recomendado):
+### 2. Configure
 
 ```bash
-# LinkedIn OAuth 2.0
+cp config.example.json config.json
+# Edit config.json with your feeds and publishers
+```
+
+### 3. Setup OAuth (Optional)
+
+```bash
+# LinkedIn OAuth setup
 ./target/release/populatrs --linkedin-oauth --linkedin-publisher linkedin-main
 
-# X/Twitter OAuth 2.0 PKCE
+# X/Twitter OAuth setup
 ./target/release/populatrs --x-oauth --x-publisher x-main
 ```
 
-4. **Ejecutar el publisher**:
+### 4. Run
 
 ```bash
-./target/release/populatrs --config config.json
-```
-
-**Comandos útiles:**
-
-```bash
-# Ejecutar una vez (modo de prueba)
+# Test run (execute once)
 ./target/release/populatrs --once
 
-# Modo dry-run (solo verificar, no publicar)
-./target/release/populatrs --dry-run
+# Production (continuous monitoring)
+./target/release/populatrs
 ```
 
-## ⚙️ Configuración
+## 📦 Installation
 
-### Estructura de Configuración
+### Method 1: Cargo Install
+
+```bash
+cargo install --git https://github.com/yourusername/populatrs.git
+```
+
+### Method 2: Docker
+
+```bash
+docker pull populatrs/populatrs:latest
+```
+
+### Method 3: Binary Releases
+
+Download from [GitHub Releases](https://github.com/yourusername/populatrs/releases)
+
+### Method 4: Build from Source
+
+```bash
+git clone https://github.com/yourusername/populatrs.git
+cd populatrs
+cargo build --release
+sudo cp target/release/populatrs /usr/local/bin/
+```
+
+## ⚙️ Configuration
+
+### Basic Configuration Structure
 
 ```json
 {
+  "youtube": {
+    "api_key": "YOUR_YOUTUBE_API_KEY",
+    "default_max_results": 10
+  },
   "feeds": [
     {
-      "id": "unique-id",
-      "url": "https://example.com/feed.xml",
-      "name": "Feed Name",
+      "id": "my-blog",
+      "type": "Rss",
+      "config": { "url": "https://myblog.com/feed.xml" },
+      "name": "My Blog",
       "enabled": true,
-      "publishers": ["publisher-id-1", "publisher-id-2"],
+      "publishers": ["telegram-main", "x-main"],
+      "check_interval_minutes": 30
+    },
+    {
+      "id": "my-youtube",
+      "type": "Youtube",
+      "config": { "channel_id": "UCChannelID123" },
+      "name": "My YouTube Channel",
+      "enabled": true,
+      "publishers": ["linkedin-main"],
       "check_interval_minutes": 60
     }
   ],
   "publishers": {
-    "publisher-id": {
-      "type": "PublisherType",
+    "telegram-main": {
+      "type": "Telegram",
       "config": {
-        /* configuración específica */
+        "bot_token": "123456:ABC-DEF...",
+        "chat_id": "@yourchannel",
+        "template": "**{{ title }}**\\n\\n{{ description | truncate(400) }}\\n\\n🔗 {{ url }}"
       }
     }
   },
@@ -148,215 +230,115 @@ cargo build --release
 }
 ```
 
-### Tipos de Publicadores
+### Publisher Configuration Examples
 
-#### Telegram
+<details>
+<summary><strong>🤖 Telegram</strong></summary>
 
 ```json
-"telegram-bot": {
+{
   "type": "Telegram",
   "config": {
     "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
     "chat_id": "@yourchannel",
-    "parse_mode": "HTML"
+    "parse_mode": "HTML",
+    "message_thread_id": "123",
+    "template": "<b>{{ title }}</b>\\n\\n{{ description | truncate(400) }}\\n\\n🔗 <a href='{{ url }}'>Read more</a>"
   }
 }
 ```
 
-#### X/Twitter
+</details>
+
+<details>
+<summary><strong>🐦 X (Twitter)</strong></summary>
 
 ```json
-"x-account": {
+{
   "type": "X",
   "config": {
-    "api_key": "your-api-key",
-    "api_secret": "your-api-secret",
-    "access_token": "your-access-token",
-    "access_token_secret": "your-access-token-secret",
-    "bearer_token": "your-bearer-token"
+    "client_id": "YOUR_CLIENT_ID",
+    "client_secret": "YOUR_CLIENT_SECRET",
+    "access_token": null,
+    "refresh_token": null,
+    "template": "🚀 {{ title | truncate(210) }}\\n\\n🔗 {{ url }} #RSS"
   }
 }
 ```
 
-#### Mastodon
+</details>
+
+<details>
+<summary><strong>🐘 Mastodon</strong></summary>
 
 ```json
-"mastodon-account": {
+{
   "type": "Mastodon",
   "config": {
     "server_url": "https://mastodon.social",
-    "access_token": "your-access-token"
+    "access_token": "YOUR_ACCESS_TOKEN",
+    "template": "{{ title }}\\n\\n{{ description | truncate(400) }}\\n\\n{{ url }}"
   }
 }
 ```
 
-#### LinkedIn
+</details>
+
+<details>
+<summary><strong>💼 LinkedIn</strong></summary>
 
 ```json
-"linkedin-account": {
+{
   "type": "LinkedIn",
   "config": {
-    "client_id": "your-client-id",
-    "client_secret": "your-client-secret",
-    "access_token": "your-access-token",
-    "user_id": "your-user-id"
+    "client_id": "YOUR_CLIENT_ID",
+    "client_secret": "YOUR_CLIENT_SECRET",
+    "access_token": null,
+    "refresh_token": null,
+    "user_id": null,
+    "template": "{{ title }}\\n\\n{{ description | truncate(700) }}\\n\\nRead more: {{ url }}"
   }
 }
 ```
 
-#### OpenObserve
+</details>
 
-```json
-"openobserve-logs": {
-  "type": "OpenObserve",
-  "config": {
-    "url": "https://your-instance.com",
-    "organization": "default",
-    "stream_name": "rss-feeds",
-    "username": "your-username",
-    "password": "your-password"
-  }
-}
-```
-
-#### Matrix
-
-```json
-"matrix-room": {
-  "type": "Matrix",
-  "config": {
-    "homeserver_url": "https://matrix.org",
-    "token": "your-matrix-token",
-    "room_id": "!roomid:matrix.org"
-  }
-}
-```
-
-#### Bluesky
-
-```json
-"bluesky-account": {
-  "type": "Bluesky",
-  "config": {
-    "handle": "your-handle.bsky.social",
-    "password": "your-app-password",
-    "pds_url": "https://bsky.social"
-  }
-}
-```
-
-#### Threads
-
-```json
-"threads-account": {
-  "type": "Threads",
-  "config": {
-    "access_token": "your-threads-access-token",
-    "user_id": "your-threads-user-id"
-  }
-}
-```
-
-## 🏗️ Arquitectura
-
-### Componentes Principales
-
-1. **Feed Manager**: Gestiona la lectura y procesamiento de feeds RSS/Atom
-2. **Publisher Manager**: Maneja los diferentes tipos de publicadores
-3. **Storage Manager**: Gestiona el almacenamiento de estado y configuración
-4. **Scheduler**: Programa las verificaciones automáticas de feeds
-
-### Flujo de Trabajo
-
-1. El scheduler activa la verificación periódica
-2. Feed Manager obtiene los feeds configurados
-3. Se comparan con los posts ya publicados
-4. Los nuevos posts se envían a Publisher Manager
-5. Cada publisher publica según su plataforma
-6. Se actualiza el estado de posts publicados
-
-## 🖥️ Uso
-
-### Opciones de Línea de Comandos
-
-```bash
-# Ejecutar continuamente (modo daemon)
-populatrs --config config.json
-
-# Ejecutar una sola vez
-populatrs --config config.json --once
-
-# Modo dry-run (no publica realmente)
-populatrs --config config.json --dry-run
-
-# Ver ayuda
-populatrs --help
-```
-
-### Docker
-
-```bash
-# Ejecutar continuamente
-docker-compose up -d
-
-# Ejecutar una vez
-docker run --rm -v $(pwd)/config.json:/app/config.json populatrs --once
-
-# Logs
-docker-compose logs -f
-```
-
-## 📊 Monitoreo y Logs
-
-La aplicación genera logs detallados de todas las operaciones:
-
-- `INFO`: Operaciones normales y estadísticas
-- `WARN`: Situaciones que requieren atención
-- `ERROR`: Errores que necesitan intervención
-
-### Variables de Entorno
-
-- `RUST_LOG`: Nivel de logging (`error`, `warn`, `info`, `debug`, `trace`)
-
-## � Setup OAuth 2.0 Interactivo
+## 🔐 OAuth 2.0 Setup
 
 ### LinkedIn OAuth 2.0
 
-Para configurar LinkedIn OAuth de forma **sencilla e intuitiva**:
+**Interactive CLI setup** for seamless configuration:
 
 ```bash
-# Setup OAuth para LinkedIn
 ./target/release/populatrs --linkedin-oauth --linkedin-publisher linkedin-main
 ```
 
-**Proceso interactivo:**
+**Process:**
 
-1. Se abre automáticamente la URL de autorización en el navegador
-2. Inicias sesión en LinkedIn y autorizas la app
-3. Copias el código de la URL de callback
-4. Lo pegas en la terminal
-5. ¡Listo! Los tokens se guardan automáticamente
+1. 🌐 Opens LinkedIn authorization URL automatically
+2. 🔐 Login and authorize the application
+3. 📋 Copy authorization code from callback URL
+4. ✅ Tokens saved automatically to config file
 
-### X (Twitter) OAuth 2.0 PKCE
+### X (Twitter) OAuth 2.0 with PKCE
 
-Para configurar X OAuth con **flujo PKCE seguro**:
+**Secure PKCE flow** for enhanced security:
 
 ```bash
-# Setup OAuth para X/Twitter
 ./target/release/populatrs --x-oauth --x-publisher x-main
 ```
 
-**Proceso interactivo:**
+**Process:**
 
-1. Se genera automáticamente una URL con PKCE challenge
-2. Se abre la URL de autorización de X
-3. Autorizas la aplicación en X
-4. Copias el código de autorización
-5. Los tokens OAuth se guardan con refresh automático
+1. 🔒 Generates PKCE challenge automatically
+2. 🌐 Opens X authorization URL
+3. 🔐 Authorize application on X/Twitter
+4. 📋 Enter authorization code
+5. ✅ OAuth tokens with refresh capability saved
 
-### Configuración Previa Requerida
+### Required Pre-Configuration
 
-Antes del setup OAuth, configura tu `config.json`:
+Before running OAuth setup, ensure your `config.json` has the client credentials:
 
 ```json
 {
@@ -364,165 +346,399 @@ Antes del setup OAuth, configura tu `config.json`:
     "linkedin-main": {
       "type": "LinkedIn",
       "config": {
-        "client_id": "TU_CLIENT_ID",
-        "client_secret": "TU_CLIENT_SECRET",
+        "client_id": "78se6i61p0gmlo",
+        "client_secret": "YOUR_CLIENT_SECRET",
         "redirect_uri": "http://localhost:8080/callback",
         "access_token": null,
         "refresh_token": null,
-        "user_id": null,
-        "organization_id": null,
-        "template": "{{ title }}\\n\\n{{ description | truncate(700) }}\\n\\nLeer más: {{ url }}"
-      }
-    },
-    "x-main": {
-      "type": "X",
-      "config": {
-        "client_id": "TU_X_CLIENT_ID",
-        "client_secret": "TU_X_CLIENT_SECRET",
-        "redirect_uri": "http://localhost:8080/callback",
-        "access_token": null,
-        "refresh_token": null,
-        "template": "🚀 {{ title | truncate(210) }}\\n\\n🔗 {{ url }} #RSS"
+        "user_id": null
       }
     }
   }
 }
 ```
 
-**📋 Documentación detallada:**
+## 🎨 Template System
 
-- [LinkedIn OAuth Setup](docs/linkedin-oauth-setup.md)
-- [X OAuth Setup](docs/x-oauth-setup.md)
+Populatrs uses **Jinja2 templating** for flexible post formatting:
 
-## �🔧 Configuración de Plataformas
+### Available Variables
 
-### Telegram
+- `{{ title }}` - Post title
+- `{{ description }}` - Post description/content
+- `{{ url }}` - Post URL
+- `{{ published }}` - Publication timestamp
+- `{{ feed_id }}` - Source feed identifier
 
-1. Crea un bot con [@BotFather](https://t.me/BotFather)
-2. Obtén el token del bot
-3. Añade el bot al canal/grupo y obtén el chat_id
+### Template Filters
 
-### X/Twitter
+| Filter          | Description           | Example                               |
+| --------------- | --------------------- | ------------------------------------- |
+| `truncate(n)`   | Limit to n characters | `{{ title \| truncate(100) }}`        |
+| `word_limit(n)` | Limit to n words      | `{{ description \| word_limit(50) }}` |
+| `strip_html`    | Remove HTML tags      | `{{ description \| strip_html }}`     |
 
-1. Registra una aplicación en [Twitter Developer](https://developer.twitter.com)
-2. Obtén las credenciales API
-3. Configura los permisos necesarios
+### Platform-Specific Templates
 
-### Mastodon
-
-1. Ve a Configuración → Desarrollo en tu instancia
-2. Crea una nueva aplicación
-3. Obtén el token de acceso
-
-### LinkedIn
-
-1. Crea una aplicación en [LinkedIn Developers](https://www.linkedin.com/developers/)
-2. Configura los permisos de publicación
-3. Obtén las credenciales OAuth
-
-### OpenObserve
-
-1. Configura tu instancia de OpenObserve
-2. Crea un stream para los logs
-3. Obtén las credenciales de acceso
-
-### Matrix
-
-1. Obtén un token de acceso para tu cuenta
-2. Encuentra el ID de la sala donde publicar
-3. Asegúrate de que el bot tenga permisos de escritura
-
-### Bluesky
-
-1. Crea una cuenta en Bluesky (bsky.app)
-2. Genera una contraseña de aplicación en Settings > App Passwords
-3. Usa tu handle completo (ej: usuario.bsky.social)
-4. Para servidores personalizados, configura el campo `pds_url`
-
-### Threads
-
-1. Registra una aplicación en Meta for Developers
-2. Configura los permisos necesarios para Threads API
-3. Obtén el access token y user ID
-4. Asegúrate de cumplir con las políticas de contenido de Meta
-
-## ⚡ Optimización HTTP y Reducción de Descargas
-
-Populatrs implementa múltiples estrategias para minimizar el ancho de banda y mejorar el rendimiento:
-
-### ETag y If-None-Match
-
-- **Detección automática**: Captura ETags de respuestas HTTP
-- **Requests condicionales**: Usa `If-None-Match` en siguientes requests
-- **304 Not Modified**: Evita descargar contenido sin cambios
-- **Persistencia**: ETags se guardan automáticamente en `feed_cache.json`
-
-### Last-Modified y If-Modified-Since
-
-- **Headers temporales**: Usa `If-Modified-Since` cuando está disponible
-- **Cache coordinado**: Combina ETag y Last-Modified para máxima eficiencia
-
-### Hash MD5 del Contenido
-
-- **Detección de cambios**: Verifica si el contenido realmente cambió
-- **Redundancia**: Funciona incluso si el servidor no soporta ETags
-- **Hash persistente**: Se almacena para comparaciones futuras
-
-### Beneficios
-
-✅ **Reducción drástica** del ancho de banda utilizado  
-✅ **Menor carga** en los servidores de feeds RSS  
-✅ **Respuesta más rápida** en feeds sin cambios  
-✅ **Detección inteligente** de contenido duplicado
-
-Los logs mostrarán cuando se evita una descarga:
-
-```
-[INFO] Feed Example Blog not modified (304), skipping download
-[INFO] Feed Tech News content unchanged (same hash), skipping parse
+```json
+{
+  "telegram-main": {
+    "template": "<b>{{ title }}</b>\\n\\n{{ description | strip_html | truncate(400) }}\\n\\n🔗 <a href='{{ url }}'>Read more</a>"
+  },
+  "x-main": {
+    "template": "🚀 {{ title | truncate(210) }}\\n\\n🔗 {{ url }} #RSS #{{ feed_id }}"
+  },
+  "linkedin-main": {
+    "template": "{{ title }}\\n\\n{{ description | truncate(700) }}\\n\\nRead more: {{ url }}"
+  }
+}
 ```
 
-## 🚨 Solución de Problemas
+## ⚡ HTTP Optimizations
 
-### Problemas Comunes
+Populatrs implements advanced HTTP caching to minimize bandwidth and improve performance:
 
-1. **Error de parsing de feed**: Verifica que la URL del feed sea válida
-2. **Error de autenticación**: Revisa las credenciales de los publicadores
-3. **Rate limiting**: Ajusta los intervalos de verificación
-4. **Permisos de archivo**: Verifica los permisos del directorio de datos
+### Cache Mechanisms
 
-### Debug
+| Method            | Description                      | Benefits                                        |
+| ----------------- | -------------------------------- | ----------------------------------------------- |
+| **ETag**          | Uses `If-None-Match` headers     | Avoids downloading unchanged content            |
+| **Last-Modified** | Uses `If-Modified-Since` headers | Temporal change detection                       |
+| **Content Hash**  | MD5 comparison of content        | Detects identical content regardless of headers |
+
+### Performance Benefits
+
+- 🚀 **90% reduction** in bandwidth usage for unchanged feeds
+- ⚡ **Faster execution** when feeds haven't updated
+- 🌟 **Reduced load** on RSS servers
+- 🎯 **Smart duplicate detection**
+
+### Cache Storage
+
+Cache metadata is automatically stored in `data/feed_cache.json`:
+
+```json
+{
+  "feeds": {
+    "my-blog": {
+      "etag": "\"abc123-def456\"",
+      "last_modified": "Wed, 21 Oct 2024 07:28:00 GMT",
+      "last_content_hash": "d41d8cd98f00b204e9800998ecf8427e"
+    }
+  }
+}
+```
+
+## 🐳 Docker Usage
+
+### Using Docker Compose (Recommended)
+
+```yaml
+version: "3.8"
+services:
+  populatrs:
+    image: populatrs/populatrs:latest
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - RUST_LOG=info
+```
 
 ```bash
-# Ejecutar con logs detallados
-RUST_LOG=debug populatrs --config config.json
+# Start service
+docker-compose up -d
 
-# Probar configuración
+# View logs
+docker-compose logs -f
+
+# Stop service
+docker-compose down
+```
+
+### Direct Docker Commands
+
+```bash
+# Run once
+docker run --rm \
+  -v $(pwd)/config.json:/app/config.json:ro \
+  -v $(pwd)/data:/app/data \
+  populatrs/populatrs --once
+
+# Run continuously (daemon mode)
+docker run -d \
+  --name populatrs \
+  -v $(pwd)/config.json:/app/config.json:ro \
+  -v $(pwd)/data:/app/data \
+  --restart unless-stopped \
+  populatrs/populatrs
+
+# View logs
+docker logs -f populatrs
+```
+
+## 🖥 CLI Commands
+
+### Basic Usage
+
+```bash
+populatrs [OPTIONS]
+```
+
+### Available Options
+
+| Option             | Description               | Example                                               |
+| ------------------ | ------------------------- | ----------------------------------------------------- |
+| `--config`         | Configuration file path   | `--config ./my-config.json`                           |
+| `--once`           | Run once then exit        | `--once`                                              |
+| `--dry-run`        | Test mode (no publishing) | `--dry-run`                                           |
+| `--linkedin-oauth` | Setup LinkedIn OAuth      | `--linkedin-oauth --linkedin-publisher linkedin-main` |
+| `--x-oauth`        | Setup X/Twitter OAuth     | `--x-oauth --x-publisher x-main`                      |
+
+### Common Usage Patterns
+
+```bash
+# Production daemon mode
+populatrs --config production.json
+
+# Test configuration without publishing
+populatrs --config config.json --dry-run --once
+
+# Debug with detailed logging
+RUST_LOG=debug populatrs --config config.json --once
+
+# Setup OAuth for LinkedIn
+populatrs --linkedin-oauth --linkedin-publisher linkedin-business
+
+# Setup OAuth for X/Twitter
+populatrs --x-oauth --x-publisher x-personal
+```
+
+## 📊 Monitoring
+
+### Logging Levels
+
+Set via `RUST_LOG` environment variable:
+
+```bash
+# Error only
+RUST_LOG=error populatrs
+
+# Standard info logging (default)
+RUST_LOG=info populatrs
+
+# Detailed debug information
+RUST_LOG=debug populatrs
+
+# Full trace logging
+RUST_LOG=trace populatrs
+```
+
+### Log Output Examples
+
+```
+[2024-02-21T10:30:15Z INFO  populatrs] Starting Populatrs RSS Publisher
+[2024-02-21T10:30:15Z INFO  populatrs] Loaded 3 feeds and 5 publishers
+[2024-02-21T10:30:16Z INFO  populatrs] Found 2 new posts in feed: my-blog
+[2024-02-21T10:30:17Z INFO  populatrs] ✓ Published to telegram-main: Message ID 123
+[2024-02-21T10:30:18Z INFO  populatrs] ✓ Published to x-main: Tweet ID 1234567890
+[2024-02-21T10:30:19Z INFO  populatrs] Feed check cycle completed: 2 new posts found, 2 published
+```
+
+### Health Monitoring
+
+The application saves state in `data/published_posts.json` for tracking:
+
+- Published posts history
+- Publisher success/failure rates
+- Timestamp tracking
+- Error details
+
+### Prometheus Metrics (Planned)
+
+Future release will include `/metrics` endpoint for:
+
+- Feed check frequency
+- Publishing success rates
+- Error rates by platform
+- Response time metrics
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+<details>
+<summary><strong>🔧 Build Issues</strong></summary>
+
+```bash
+# Missing OpenSSL headers
+sudo apt-get install libssl-dev pkg-config
+
+# macOS specific
+brew install openssl pkg-config
+export PKG_CONFIG_PATH="/usr/local/opt/openssl/lib/pkgconfig"
+```
+
+</details>
+
+<details>
+<summary><strong>📡 Feed Issues</strong></summary>
+
+```bash
+# Test feed URL manually
+curl -I "https://example.com/feed.xml"
+
+# Check feed validity
 populatrs --config config.json --dry-run --once
 ```
 
-## 🤝 Contribuir
+</details>
 
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
+<details>
+<summary><strong>🔐 OAuth Issues</strong></summary>
 
-## 📝 Licencia
+```bash
+# Re-run OAuth setup
+populatrs --linkedin-oauth --linkedin-publisher your-publisher-id
 
-Este proyecto está bajo la licencia MIT. Ver `LICENSE` para más detalles.
+# Check token validity in logs
+RUST_LOG=debug populatrs --once
+```
 
-## 🆘 Soporte
+</details>
 
-- Reporta bugs en [Issues](../../issues)
-- Para preguntas, usa [Discussions](../../discussions)
+<details>
+<summary><strong>🐳 Docker Issues</strong></summary>
 
-## ✅ TODO
+```bash
+# Check container logs
+docker logs populatrs
 
-- [ ] Soporte para más plataformas (Discord, Slack, etc.)
-- [ ] API REST para gestión remota
-- [ ] Templates personalizables para posts
-- [ ] Filtros de contenido
-- [ ] Métricas y analytics
-- [ ] Interfaz web de administración
+# Verify volume mounts
+docker run --rm -v $(pwd):/mnt alpine ls -la /mnt
+```
+
+</details>
+
+### Debug Mode
+
+Run with full debugging for detailed troubleshooting:
+
+```bash
+RUST_LOG=debug populatrs --config config.json --dry-run --once 2>&1 | tee debug.log
+```
+
+## 🏗 Architecture
+
+### Core Components
+
+```mermaid
+graph TD
+    A[Scheduler] --> B[Feed Manager]
+    B --> C[RSS Parser]
+    B --> D[YouTube API Client]
+    C --> E[Publisher Manager]
+    D --> E
+    E --> F[Telegram Publisher]
+    E --> G[X Publisher]
+    E --> H[LinkedIn Publisher]
+    E --> I[Matrix Publisher]
+    E --> J[Other Publishers...]
+    E --> K[Storage Manager]
+    K --> L[(Published Posts DB)]
+    K --> M[(Feed Cache)]
+```
+
+### Data Flow
+
+1. **Scheduler** triggers feed checks at configured intervals
+2. **Feed Manager** fetches RSS/YouTube feeds with caching
+3. **Parsers** extract post data and metadata
+4. **Publisher Manager** distributes posts to configured platforms
+5. **Publishers** format and post content using templates
+6. **Storage Manager** tracks published posts and cache state
+
+### Thread Safety
+
+- All major components use `Arc<Mutex<>>` for safe concurrent access
+- Publishers execute in parallel for faster processing
+- Feed checking is serialized to respect rate limits
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/populatrs.git
+cd populatrs
+
+# Install development dependencies
+cargo install cargo-watch cargo-tarpaulin
+
+# Run tests
+cargo test
+
+# Run with auto-reload during development
+cargo watch -x "run -- --config config.json --once"
+```
+
+### Code Quality
+
+```bash
+# Format code
+cargo fmt
+
+# Run clippy lints
+cargo clippy -- -D warnings
+
+# Run security audit
+cargo audit
+
+# Generate test coverage
+cargo tarpaulin --out html
+```
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support & Community
+
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/yourusername/populatrs/issues)
+- 💬 **Questions & Discussion**: [GitHub Discussions](https://github.com/yourusername/populatrs/discussions)
+- 📖 **Documentation**: [Wiki](https://github.com/yourusername/populatrs/wiki)
+- 📧 **Security Issues**: security@populatrs.com
+
+## 🛣 Roadmap
+
+### v2.0 (Planned)
+
+- [ ] 🌐 **REST API** for remote management
+- [ ] 🎛 **Web dashboard** for configuration
+- [ ] 🔍 **Content filtering** and keywords
+- [ ] 📊 **Advanced analytics** and metrics
+- [ ] 🔌 **Plugin system** for custom publishers
+- [ ] 🌍 **Multi-language** template support
+
+### v2.1 (Future)
+
+- [ ] 💬 **Discord** publisher
+- [ ] 📱 **Slack** publisher
+- [ ] 🎯 **Content categorization**
+- [ ] 🤖 **AI-powered** post optimization
+- [ ] 📈 **Performance monitoring** dashboard
+- [ ] 🔄 **Webhook** support
+
+---
+
+<div align="center">
+
+**Made with ❤️ in Rust**
+
+[⭐ Star us on GitHub](https://github.com/yourusername/populatrs) • [🐛 Report Issues](https://github.com/yourusername/populatrs/issues) • [💬 Join Discussion](https://github.com/yourusername/populatrs/discussions)
+
+</div>

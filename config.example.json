@@ -5,29 +5,29 @@
     },
     "feeds": [
         {
-            "id": "atareao-youtube-api",
+            "id": "my-youtube-channel",
             "type": "Youtube",
             "config": {
-                "channel_id": "UCP8dTCaLNJFxfklb_GNqe6A"
+                "channel_id": "YOUR_YOUTUBE_CHANNEL_ID"
             },
-            "name": "Canal de YouTube de Atareao (API)",
+            "name": "Mi Canal de YouTube",
             "enabled": true,
             "publishers": [
-                "matrix-territoriolinux",
-                "openobserve-territoriolinux"
+                "matrix-main",
+                "openobserve-main"
             ],
             "check_interval_minutes": 60,
             "max_retries": 3,
             "retry_delay_seconds": 2
         },
         {
-            "id": "atareao-youtube-playlist",
+            "id": "my-youtube-playlist",
             "type": "Youtube",
             "config": {
-                "playlist_id": "PLjABykPy-panel-example",
+                "playlist_id": "YOUR_YOUTUBE_PLAYLIST_ID",
                 "max_results": 5
             },
-            "name": "Playlist específica de YouTube",
+            "name": "Mi Playlist de YouTube",
             "enabled": true,
             "publishers": [
                 "telegram-topic"
@@ -37,16 +37,16 @@
             "retry_delay_seconds": 2
         },
         {
-            "id": "atareao-blog",
+            "id": "my-blog-rss",
             "type": "Rss",
             "config": {
-                "url": "https://atareao.es/feed/"
+                "url": "https://yourdomain.com/feed/"
             },
-            "name": "Blog de Atareao",
+            "name": "Mi Blog RSS",
             "enabled": true,
             "publishers": [
-                "matrix-territoriolinux",
-                "openobserve-territoriolinux"
+                "matrix-main",
+                "openobserve-main"
             ],
             "check_interval_minutes": 60,
             "max_retries": 3,
@@ -101,11 +101,10 @@
                 "access_token": null,
                 "refresh_token": null,
                 "user_id": null,
-                "organization_id": null,
                 "template": "{{ title }}\n\n{{ description | truncate(700) }}\n\nLeer más: {{ url }}"
             }
         },
-        "openobserve-territoriolinux": {
+        "openobserve-main": {
             "type": "OpenObserve",
             "config": {
                 "url": "https://your-openobserve-instance.com",
@@ -115,7 +114,7 @@
                 "template": "Feed: {{ title }}\nDescription: {{ description }}\nURL: {{ url }}"
             }
         },
-        "matrix-territoriolinux": {
+        "matrix-main": {
             "type": "Matrix",
             "config": {
                 "homeserver_url": "https://matrix.yourdomain.com",

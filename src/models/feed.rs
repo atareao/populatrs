@@ -271,6 +271,11 @@ impl Feed {
             filtered_posts.len()
         );
 
+        // Update feed_id to use the correct feed ID instead of hardcoded "youtube"
+        for post in &mut filtered_posts {
+            post.feed_id = self.config.id.clone();
+        }
+
         // Sort the filtered posts by publication date (oldest first) for correct publication order
         // This ensures that if there are 2 new videos, the older one is published first
         filtered_posts.sort_by(|a, b| a.published.cmp(&b.published));
@@ -320,15 +325,35 @@ impl Feed {
             self.last_post_date = Some(latest);
         }
 
-        // Sort posts by publication date (newest first)
+        // Sort posts by publication date (newest first) to get the latest ones
         posts.sort_by(|a, b| b.published.cmp(&a.published));
         // Limit to only the 2 most recent posts
         posts.truncate(2);
+
+        log::info!("Available posts after sorting:");
+        for (i, post) in posts.iter().enumerate() {
+            log::info!("  {}: '{}' ({})", i + 1, post.title, post.published);
+        }
+
+        // Sort the filtered posts by publication date (oldest first) for correct publication order
+        // This ensures that if there are multiple new posts, the older one is published first
+        posts.sort_by(|a, b| a.published.cmp(&b.published));
+
         log::info!(
-            "Found {} new posts in feed: {}",
+            "Selected {} RSS posts for publishing from feed: {} (ordered for publication)",
             posts.len(),
             self.config.name
         );
+
+        for (i, post) in posts.iter().enumerate() {
+            log::info!(
+                "Will publish #{}: '{}' ({})",
+                i + 1,
+                post.title,
+                post.published
+            );
+        }
+
         Ok(posts)
     }
 
@@ -359,17 +384,35 @@ impl Feed {
             self.last_post_date = Some(latest);
         }
 
-        // Sort posts by publication date (newest first)
+        // Sort posts by publication date (newest first) to get the latest ones
         posts.sort_by(|a, b| b.published.cmp(&a.published));
-
         // Limit to only the 2 most recent posts
         posts.truncate(2);
 
+        log::info!("Available posts after sorting:");
+        for (i, post) in posts.iter().enumerate() {
+            log::info!("  {}: '{}' ({})", i + 1, post.title, post.published);
+        }
+
+        // Sort the filtered posts by publication date (oldest first) for correct publication order
+        // This ensures that if there are multiple new posts, the older one is published first
+        posts.sort_by(|a, b| a.published.cmp(&b.published));
+
         log::info!(
-            "Found {} new posts in feed: {}",
+            "Selected {} feed posts for publishing from feed: {} (ordered for publication)",
             posts.len(),
             self.config.name
         );
+
+        for (i, post) in posts.iter().enumerate() {
+            log::info!(
+                "Will publish #{}: '{}' ({})",
+                i + 1,
+                post.title,
+                post.published
+            );
+        }
+
         Ok(posts)
     }
 
