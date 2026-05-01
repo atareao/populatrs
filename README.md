@@ -305,6 +305,24 @@ sudo cp target/release/populatrs /usr/local/bin/
 </details>
 
 <details>
+<summary><strong>🧵 Threads</strong></summary>
+
+```json
+{
+  "type": "Threads",
+  "config": {
+    "access_token": "YOUR_THREADS_ACCESS_TOKEN",
+    "user_id": "YOUR_THREADS_USER_ID",
+    "template": "{{ title }}\\n\\n{{ description | truncate(450) }}\\n\\n{{ url }}"
+  }
+}
+```
+
+Threads requires both `access_token` and `user_id`.
+
+</details>
+
+<details>
 <summary><strong>💬 Discord</strong></summary>
 
 Use a Discord webhook URL for simple setup:
@@ -345,6 +363,110 @@ Use a Discord webhook URL for simple setup:
 3. 📋 Copy authorization code from callback URL
 4. ✅ Tokens saved automatically to config file
 
+#### Manual access token acquisition
+
+If you want to obtain a LinkedIn `access_token` manually, follow the same flow those two shell scripts implemented: first generate an authorization URL, then exchange the returned `code` for tokens.
+
+**Step 1: Prepare the redirect URI and app credentials**
+
+Prepare these values and make sure they match your LinkedIn app configuration exactly:
+
+- `CLIENT_ID`
+- `CLIENT_SECRET`
+- `REDIRECT_URI`
+
+Important:
+
+- The `REDIRECT_URI` must be the same one configured in your LinkedIn app
+- The same `REDIRECT_URI` should also be used in your `config.json` for the LinkedIn publisher
+- Do not commit real secrets or tokens to the repository
+
+Example values:
+
+```bash
+CLIENT_ID="YOUR_LINKEDIN_CLIENT_ID"
+CLIENT_SECRET="YOUR_LINKEDIN_CLIENT_SECRET"
+REDIRECT_URI="http://localhost:3000/callback"
+STATE="$(uuidgen)"
+SCOPE="w_member_social openid profile email"
+```
+
+**Step 2: Generate the authorization URL**
+
+Build and open the authorization URL:
+
+```bash
+echo "https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}&state=${STATE}&scope=${SCOPE}"
+```
+
+This prints a URL like this:
+
+```text
+https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=...&redirect_uri=...&state=...&scope=w_member_social%20openid%20profile%20email
+```
+
+Open that URL in your browser, sign in to LinkedIn, and approve the application.
+
+**Step 3: Copy the authorization code**
+
+After authorization, LinkedIn redirects to your callback URL, for example:
+
+```text
+http://localhost:3000/callback?code=AQ...&state=...
+```
+
+Copy the `code` parameter from that URL.
+
+**Step 4: Exchange the code for tokens**
+
+Export the code you just copied and exchange it for tokens:
+
+```bash
+CODE="PASTE_THE_AUTHORIZATION_CODE_HERE"
+curl -X POST \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code&code=${CODE}&redirect_uri=${REDIRECT_URI}&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}" \
+  https://www.linkedin.com/oauth/v2/accessToken
+```
+
+That request is sent to:
+
+```text
+https://www.linkedin.com/oauth/v2/accessToken
+```
+
+If the request succeeds, LinkedIn returns a JSON payload with a new `access_token`, and depending on the app permissions and LinkedIn response, also a `refresh_token`.
+
+**Step 5: Update `config.json`**
+
+Copy the new token values into your LinkedIn publisher configuration:
+
+```json
+{
+  "publishers": {
+    "linkedin-main": {
+      "type": "LinkedIn",
+      "config": {
+        "client_id": "YOUR_LINKEDIN_CLIENT_ID",
+        "client_secret": "YOUR_LINKEDIN_CLIENT_SECRET",
+        "redirect_uri": "http://localhost:3000/callback",
+        "access_token": "NEW_ACCESS_TOKEN",
+        "refresh_token": "NEW_REFRESH_TOKEN",
+        "user_id": null
+      }
+    }
+  }
+}
+```
+
+**When to use this manual flow**
+
+- When the interactive command `--linkedin-oauth` is not convenient
+- When you need to obtain LinkedIn tokens outside the Rust CLI flow
+- When you want to verify the OAuth exchange manually with `curl`
+
+If you already have a valid `refresh_token` in `config.json`, Populatrs can also refresh the LinkedIn token automatically during execution.
+
 ### X (Twitter) OAuth 2.0 with PKCE
 
 **Secure PKCE flow** for enhanced security:
@@ -360,6 +482,83 @@ Use a Discord webhook URL for simple setup:
 3. 🔐 Authorize application on X/Twitter
 4. 📋 Enter authorization code
 5. ✅ OAuth tokens with refresh capability saved
+
+### Threads access token
+
+If you want to obtain a Threads `access_token` manually, `threads.sh` represents the token exchange step of the OAuth flow. Unlike the LinkedIn helper pair, this file only covers the exchange request, so you must already have a valid authorization `code` from the Threads authorization redirect.
+
+**Step 1: Obtain the authorization code**
+
+Open the Threads authorization URL in your browser with your own app values:
+
+```text
+https://threads.net/oauth/authorize?client_id=YOUR_THREADS_APP_ID&redirect_uri=YOUR_REDIRECT_URI&scope=threads_basic,threads_content_publish&response_type=code&state=YOUR_STATE
+```
+
+After the user authorizes the application, Threads redirects to your callback URL with a `code` parameter. Example:
+
+```text
+https://your-app.example/callback?code=AQ...#_
+```
+
+Copy the `code` value. If the callback ends with `#_`, ignore that suffix because it is not part of the code.
+
+**Step 2: Exchange the code for a token**
+
+Prepare these values:
+
+- `CLIENT_ID`
+- `CLIENT_SECRET`
+- `REDIRECT_URI`
+- `CODE`
+
+Then run:
+
+```bash
+curl -X POST \
+  https://graph.threads.net/oauth/access_token \
+  -F client_id="YOUR_THREADS_APP_ID" \
+  -F client_secret="YOUR_THREADS_APP_SECRET" \
+  -F grant_type=authorization_code \
+  -F redirect_uri="YOUR_REDIRECT_URI" \
+  -F code="PASTE_THE_AUTHORIZATION_CODE_HERE"
+```
+
+This is the same exchange implemented in `threads.sh`.
+
+If the request succeeds, Threads returns a JSON payload like:
+
+```json
+{
+  "access_token": "THQVJ...",
+  "user_id": 17841405793187218
+}
+```
+
+`access_token` is required to publish. In this project, `user_id` is also required because the Threads publisher uses it to call the posting endpoints.
+
+**Step 3: Update `config.json`**
+
+Copy both values into your Threads publisher configuration:
+
+```json
+{
+  "publishers": {
+    "threads-main": {
+      "type": "Threads",
+      "config": {
+        "access_token": "YOUR_THREADS_ACCESS_TOKEN",
+        "user_id": "YOUR_THREADS_USER_ID",
+        "template": "{{ title }}\n\n{{ description | truncate(450) }}\n\n{{ url }}"
+      }
+    }
+  }
+}
+```
+
+**Optional: exchange for a long-lived token**
+
+Threads short-lived user tokens can be exchanged for long-lived tokens. If you need a longer-lived credential for production use, Meta documents an additional server-side exchange using the short-lived token and your app secret.
 
 ### Required Pre-Configuration
 
