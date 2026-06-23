@@ -1,42 +1,36 @@
-# 🚀 Populatrs - RSS Feed Publisher
-
 <div align="center">
+  <h1>🚀 Populatrs</h1>
+  <p><em>Automated RSS feed publisher for multiple social platforms with intelligent caching and robust retry mechanisms</em></p>
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/populatrs/populatrs/ci.yml?branch=main&style=for-the-badge)](https://github.com/populatrs/populatrs/actions)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](LICENSE)
-[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange.svg?style=for-the-badge)](https://www.rust-lang.org)
-[![Docker](https://img.shields.io/badge/docker-supported-blue.svg?style=for-the-badge&logo=docker)](https://hub.docker.com/r/populatrs/populatrs)
-[![Release](https://img.shields.io/github/v/release/populatrs/populatrs?style=for-the-badge)](https://github.com/populatrs/populatrs/releases)
-
-_Automated RSS feed publisher for multiple social platforms with intelligent caching and robust retry mechanisms_
-
-[Features](#-features) • [Quick Start](#-quick-start) • [Installation](#-installation) • [Configuration](#-configuration) • [Documentation](#-documentation)
-
-</div>
+[![CI](https://img.shields.io/github/actions/workflow/status/atareao/populatrs/ci.yml?branch=main&style=flat-square&logo=github&label=CI)](https://github.com/atareao/populatrs/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/atareao/populatrs?style=flat-square&logo=semver&sort=semver)](https://github.com/atareao/populatrs/releases)
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange?style=flat-square&logo=rust)](https://rust-lang.org)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED?style=flat-square&logo=docker)](https://github.com/atareao/populatrs/pkgs/container/populatrs)
+[![Last Commit](https://img.shields.io/github/last-commit/atareao/populatrs/main?style=flat-square&logo=git)](https://github.com/atareao/populatrs/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/atareao/populatrs/total?style=flat-square&logo=github)](https://github.com/atareao/populatrs/releases)
 
 ---
 
-## 📋 Table of Contents
+<p align="center">
+  <a href="#-features">Features</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-installation">Installation</a> •
+  <a href="#-configuration">Configuration</a> •
+  <a href="#-oauth-20-setup">OAuth</a> •
+  <a href="#-docker-usage">Docker</a> •
+  <a href="#-cli-commands">CLI</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-contributing">Contributing</a>
+</p>
 
-- [Features](#-features)
-- [Supported Platforms](#-supported-platforms)
-- [Quick Start](#-quick-start)
-- [Installation](#-installation)
-- [Configuration](#-configuration)
-- [OAuth 2.0 Setup](#-oauth-20-setup)
-- [Template System](#-template-system)
-- [HTTP Optimizations](#-http-optimizations)
-- [Docker Usage](#-docker-usage)
-- [CLI Commands](#-cli-commands)
-- [Monitoring](#-monitoring)
-- [Contributing](#-contributing)
-- [License](#-license)
+</div>
 
 ## ✨ Features
 
 ### 📡 Multi-Source Feed Processing
 
-- **RSS/Atom**: Complete support for RSS 2.0 and Atom feeds
+- **RSS/Atom**: Full support for RSS 2.0 and Atom feeds
 - **YouTube API v3**: Direct integration with YouTube Data API
   - Channel feeds by ID, username or custom URL
   - Playlist monitoring
@@ -45,16 +39,16 @@ _Automated RSS feed publisher for multiple social platforms with intelligent cac
 
 ### 🎯 8 Publishing Platforms
 
-| Platform        | Auth Method    | Features                                |
-| --------------- | -------------- | --------------------------------------- |
-| **Telegram**    | Bot Token      | Topics, HTML formatting, thread support |
-| **X (Twitter)** | OAuth 2.0 PKCE | Character limits, media support         |
-| **Mastodon**    | Bearer Token   | Any instance, rich formatting           |
-| **LinkedIn**    | OAuth 2.0      | Personal/Organization posts             |
-| **Matrix**      | Access Token   | HTML messages, room targeting           |
-| **Bluesky**     | App Password   | Decentralized posting                   |
-| **Threads**     | Access Token   | Meta's text platform                    |
-| **OpenObserve** | API Key        | Structured logging                      |
+| Platform | Auth Method | Features |
+|---|---|---|
+| **Telegram** | Bot Token | Topics, HTML formatting, thread support |
+| **X (Twitter)** | OAuth 2.0 PKCE | Character limits, media support |
+| **Mastodon** | Bearer Token | Any instance, rich formatting |
+| **LinkedIn** | OAuth 2.0 | Personal/Organization posts |
+| **Matrix** | Access Token | HTML messages, room targeting |
+| **Bluesky** | App Password | Decentralized posting |
+| **Threads** | Access Token | Meta's text platform |
+| **OpenObserve** | API Key | Structured logging |
 
 ### 🔐 Advanced OAuth 2.0 Support
 
@@ -82,26 +76,8 @@ _Automated RSS feed publisher for multiple social platforms with intelligent cac
 #RSS #Automation
 ```
 
-**Available Filters:** `truncate`, `word_limit`, `strip_html`  
+**Available Filters:** `truncate`, `word_limit`, `strip_html`
 **Variables:** `title`, `description`, `url`, `published`, `feed_id`
-
-## 🏗 Supported Platforms
-
-<div align="center">
-
-| Platform    | Logo                                                                                                                                      | Status    | Auth Method    |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------------- |
-| Telegram    | <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" width="24">                                              | ✅ Active | Bot Token      |
-| X (Twitter) | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ce/X_logo_2023.svg" width="24">                                                | ✅ Active | OAuth 2.0 PKCE |
-| Mastodon    | <img src="https://upload.wikimedia.org/wikipedia/commons/4/48/Mastodon_Logotype_%28Simple%29.svg" width="24">                             | ✅ Active | Bearer Token   |
-| LinkedIn    | <img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" width="24">                                     | ✅ Active | OAuth 2.0      |
-| Matrix      | <img src="https://upload.wikimedia.org/wikipedia/commons/9/9d/Matrix_logo.svg" width="24">                                                | ✅ Active | Access Token   |
-| Discord     | <img src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6ca814282eca7172c6_icon_clyde_white_RGB.svg" width="24"> | ✅ Active | Webhook URL    |
-| Bluesky     | <img src="https://upload.wikimedia.org/wikipedia/commons/7/7a/Bluesky_Logo.svg" width="24">                                               | ✅ Active | App Password   |
-| Threads     | 🧵                                                                                                                                        | ✅ Active | Access Token   |
-| OpenObserve | 📊                                                                                                                                        | ✅ Active | API Key        |
-
-</div>
 
 ## 🚀 Quick Start
 
@@ -110,18 +86,18 @@ _Automated RSS feed publisher for multiple social platforms with intelligent cac
 - **Rust 1.70+** ([Install Rust](https://rustup.rs/))
 - **System dependencies**:
 
-  ```bash
-  # Ubuntu/Debian
-  sudo apt update && sudo apt install -y build-essential pkg-config libssl-dev
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install -y build-essential pkg-config libssl-dev
 
-  # macOS
-  brew install openssl pkg-config
-  ```
+# macOS
+brew install openssl pkg-config
+```
 
 ### 1. Download & Build
 
 ```bash
-git clone https://github.com/yourusername/populatrs.git
+git clone https://github.com/atareao/populatrs.git
 cd populatrs
 cargo build --release
 ```
@@ -158,23 +134,23 @@ cp config.example.json config.json
 ### Method 1: Cargo Install
 
 ```bash
-cargo install --git https://github.com/yourusername/populatrs.git
+cargo install --git https://github.com/atareao/populatrs.git
 ```
 
 ### Method 2: Docker
 
 ```bash
-docker pull populatrs/populatrs:latest
+docker pull ghcr.io/atareao/populatrs:latest
 ```
 
 ### Method 3: Binary Releases
 
-Download from [GitHub Releases](https://github.com/yourusername/populatrs/releases)
+Download from [GitHub Releases](https://github.com/atareao/populatrs/releases)
 
 ### Method 4: Build from Source
 
 ```bash
-git clone https://github.com/yourusername/populatrs.git
+git clone https://github.com/atareao/populatrs.git
 cd populatrs
 cargo build --release
 sudo cp target/release/populatrs /usr/local/bin/
@@ -596,11 +572,11 @@ Populatrs uses **Jinja2 templating** for flexible post formatting:
 
 ### Template Filters
 
-| Filter          | Description           | Example                               |
-| --------------- | --------------------- | ------------------------------------- |
-| `truncate(n)`   | Limit to n characters | `{{ title \| truncate(100) }}`        |
-| `word_limit(n)` | Limit to n words      | `{{ description \| word_limit(50) }}` |
-| `strip_html`    | Remove HTML tags      | `{{ description \| strip_html }}`     |
+| Filter | Description | Example |
+|---|---|---|
+| `truncate(n)` | Limit to n characters | `{{ title \| truncate(100) }}` |
+| `word_limit(n)` | Limit to n words | `{{ description \| word_limit(50) }}` |
+| `strip_html` | Remove HTML tags | `{{ description \| strip_html }}` |
 
 ### Platform-Specific Templates
 
@@ -624,11 +600,11 @@ Populatrs implements advanced HTTP caching to minimize bandwidth and improve per
 
 ### Cache Mechanisms
 
-| Method            | Description                      | Benefits                                        |
-| ----------------- | -------------------------------- | ----------------------------------------------- |
-| **ETag**          | Uses `If-None-Match` headers     | Avoids downloading unchanged content            |
-| **Last-Modified** | Uses `If-Modified-Since` headers | Temporal change detection                       |
-| **Content Hash**  | MD5 comparison of content        | Detects identical content regardless of headers |
+| Method | Description | Benefits |
+|---|---|---|
+| **ETag** | Uses `If-None-Match` headers | Avoids downloading unchanged content |
+| **Last-Modified** | Uses `If-Modified-Since` headers | Temporal change detection |
+| **Content Hash** | MD5 comparison of content | Detects identical content regardless of headers |
 
 ### Performance Benefits
 
@@ -658,10 +634,9 @@ Cache metadata is automatically stored in `data/feed_cache.json`:
 ### Using Docker Compose (Recommended)
 
 ```yaml
-version: "3.8"
 services:
   populatrs:
-    image: populatrs/populatrs:latest
+    image: ghcr.io/atareao/populatrs:latest
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data
@@ -672,13 +647,13 @@ services:
 
 ```bash
 # Start service
-docker-compose up -d
+docker compose up -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop service
-docker-compose down
+docker compose down
 ```
 
 ### Direct Docker Commands
@@ -688,7 +663,7 @@ docker-compose down
 docker run --rm \
   -v $(pwd)/config.json:/app/config.json:ro \
   -v $(pwd)/data:/app/data \
-  populatrs/populatrs --once
+  ghcr.io/atareao/populatrs --once
 
 # Run continuously (daemon mode)
 docker run -d \
@@ -696,7 +671,7 @@ docker run -d \
   -v $(pwd)/config.json:/app/config.json:ro \
   -v $(pwd)/data:/app/data \
   --restart unless-stopped \
-  populatrs/populatrs
+  ghcr.io/atareao/populatrs
 
 # View logs
 docker logs -f populatrs
@@ -712,13 +687,13 @@ populatrs [OPTIONS]
 
 ### Available Options
 
-| Option             | Description               | Example                                               |
-| ------------------ | ------------------------- | ----------------------------------------------------- |
-| `--config`         | Configuration file path   | `--config ./my-config.json`                           |
-| `--once`           | Run once then exit        | `--once`                                              |
-| `--dry-run`        | Test mode (no publishing) | `--dry-run`                                           |
-| `--linkedin-oauth` | Setup LinkedIn OAuth      | `--linkedin-oauth --linkedin-publisher linkedin-main` |
-| `--x-oauth`        | Setup X/Twitter OAuth     | `--x-oauth --x-publisher x-main`                      |
+| Option | Description | Example |
+|---|---|---|
+| `--config` | Configuration file path | `--config ./my-config.json` |
+| `--once` | Run once then exit | `--once` |
+| `--dry-run` | Test mode (no publishing) | `--dry-run` |
+| `--linkedin-oauth` | Setup LinkedIn OAuth | `--linkedin-oauth --linkedin-publisher linkedin-main` |
+| `--x-oauth` | Setup X/Twitter OAuth | `--x-oauth --x-publisher x-main` |
 
 ### Common Usage Patterns
 
@@ -897,7 +872,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/populatrs.git
+git clone https://github.com/atareao/populatrs.git
 cd populatrs
 
 # Install development dependencies
@@ -932,9 +907,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Support & Community
 
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/yourusername/populatrs/issues)
-- 💬 **Questions & Discussion**: [GitHub Discussions](https://github.com/yourusername/populatrs/discussions)
-- 📖 **Documentation**: [Wiki](https://github.com/yourusername/populatrs/wiki)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/atareao/populatrs/issues)
+- 💬 **Questions & Discussion**: [GitHub Discussions](https://github.com/atareao/populatrs/discussions)
+- 📖 **Documentation**: [Wiki](https://github.com/atareao/populatrs/wiki)
 - 📧 **Security Issues**: security@populatrs.com
 
 ## 🛣 Roadmap
@@ -963,6 +938,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Made with ❤️ in Rust**
 
-[⭐ Star us on GitHub](https://github.com/yourusername/populatrs) • [🐛 Report Issues](https://github.com/yourusername/populatrs/issues) • [💬 Join Discussion](https://github.com/yourusername/populatrs/discussions)
+[⭐ Star us on GitHub](https://github.com/atareao/populatrs) • [🐛 Report Issues](https://github.com/atareao/populatrs/issues) • [💬 Join Discussion](https://github.com/atareao/populatrs/discussions)
 
 </div>
