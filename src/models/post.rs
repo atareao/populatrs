@@ -186,6 +186,7 @@ impl PublishedPostsStorage {
         self.posts.push(published_post);
     }
 
+    #[allow(dead_code)]
     pub fn get_published_count(&self, feed_id: &str) -> usize {
         self.posts.iter().filter(|p| p.feed_id == feed_id).count()
     }

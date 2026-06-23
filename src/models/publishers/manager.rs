@@ -6,6 +6,7 @@ use crate::models::{Post, PublisherConfig, TemplateRenderer};
 use anyhow::Result;
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 pub fn create_publisher(id: String, config: &PublisherConfig) -> Result<Box<dyn Publisher>> {
     create_publisher_with_config_path(id, config, None)
 }
@@ -186,6 +187,7 @@ pub struct PublisherManager {
 }
 
 impl PublisherManager {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             publishers: HashMap::new(),
@@ -226,10 +228,12 @@ impl PublisherManager {
         results
     }
 
-    pub fn get_publisher(&self, id: &str) -> Option<&Box<dyn Publisher>> {
-        self.publishers.get(id)
+    #[allow(dead_code)]
+    pub fn get_publisher(&self, id: &str) -> Option<&dyn Publisher> {
+        self.publishers.get(id).map(|p| p.as_ref())
     }
 
+    #[allow(dead_code)]
     pub fn list_publishers(&self) -> Vec<(&str, &str)> {
         self.publishers
             .iter()

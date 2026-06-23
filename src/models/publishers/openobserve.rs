@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde_json::json;
 
 pub struct OpenObservePublisher {
+    #[allow(dead_code)]
     pub id: String,
     pub url: String,
     pub organization: String,

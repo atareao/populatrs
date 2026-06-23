@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 pub struct MatrixPublisher {
+    #[allow(dead_code)]
     pub id: String,
     pub homeserver_url: String,
     pub access_token: String,

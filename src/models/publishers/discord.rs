@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde_json::json;
 
 pub struct DiscordPublisher {
+    #[allow(dead_code)]
     pub id: String,
     pub webhook_url: String,
     pub template: String,

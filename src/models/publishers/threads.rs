@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use tokio::time;
 
 pub struct ThreadsPublisher {
+    #[allow(dead_code)]
     pub id: String,
     pub access_token: String,
     pub user_id: String,
