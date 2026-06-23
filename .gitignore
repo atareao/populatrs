@@ -1,0 +1,30 @@
+# Rust
+target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Application specific
+config.json
+data/
+*.log
+feed_cache.json
+
+# Docker
+.dockerignore
+
+# Backup files
+*.backup.*
+
+# Environment variables
+.env
+.env.local
