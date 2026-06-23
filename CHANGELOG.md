@@ -1,4 +1,10 @@
 # Changelog
+## [0.1.4] - 2026-06-23
+
+### Bug Fixes
+
+- Fix clippy warnings across codebase
+- Fix clippy warnings across codebase
 ## [0.1.3] - 2026-06-23
 
 ### Documentation
@@ -10,6 +16,7 @@
 
 - Configure gitflow with CI/CD workflows
 - Use GITHUB_TOKEN instead of GH_PAT, add docker publish to ghcr
+- Release v0.1.3
 
 ### Other
 
