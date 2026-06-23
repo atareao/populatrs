@@ -85,9 +85,7 @@ El formato determina el bump automático:
 
 ## Secretos de GitHub necesarios
 
-| Secreto | Propósito |
-|---|---|
-| `GH_PAT` | Personal Access Token con scope `contents: write` |
+No se requieren secretos adicionales. El `GITHUB_TOKEN` por defecto tiene permisos suficientes con `contents: write` y `packages: write`.
 
 ## Resumen visual
 
