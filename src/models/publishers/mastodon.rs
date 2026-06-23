@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 pub struct MastodonPublisher {
+    #[allow(dead_code)]
     pub id: String,
     pub server_url: String,
     pub access_token: String,

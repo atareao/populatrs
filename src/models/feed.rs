@@ -24,6 +24,7 @@ pub struct Feed {
 }
 
 impl Feed {
+    #[allow(dead_code)]
     pub fn new(config: FeedConfig, youtube_config: Option<YouTubeGlobalConfig>) -> Self {
         Self {
             config,
@@ -247,7 +248,7 @@ impl Feed {
         }
 
         // Sort by publication date (newest first) to get the latest ones
-        posts.sort_by(|a, b| b.published.cmp(&a.published));
+        posts.sort_by_key(|b| std::cmp::Reverse(b.published));
 
         // Update our last post date to the most recent post
         if let Some(latest_post) = posts.first() {
@@ -278,7 +279,7 @@ impl Feed {
 
         // Sort the filtered posts by publication date (oldest first) for correct publication order
         // This ensures that if there are 2 new videos, the older one is published first
-        filtered_posts.sort_by(|a, b| a.published.cmp(&b.published));
+        filtered_posts.sort_by_key(|a| a.published);
 
         log::info!(
             "Selected {} YouTube videos for publishing from feed: {} (ordered for publication)",
@@ -326,7 +327,7 @@ impl Feed {
         }
 
         // Sort posts by publication date (newest first) to get the latest ones
-        posts.sort_by(|a, b| b.published.cmp(&a.published));
+        posts.sort_by_key(|b| std::cmp::Reverse(b.published));
         // Limit to only the 2 most recent posts
         posts.truncate(2);
 
@@ -337,7 +338,7 @@ impl Feed {
 
         // Sort the filtered posts by publication date (oldest first) for correct publication order
         // This ensures that if there are multiple new posts, the older one is published first
-        posts.sort_by(|a, b| a.published.cmp(&b.published));
+        posts.sort_by_key(|a| a.published);
 
         log::info!(
             "Selected {} RSS posts for publishing from feed: {} (ordered for publication)",
@@ -385,7 +386,7 @@ impl Feed {
         }
 
         // Sort posts by publication date (newest first) to get the latest ones
-        posts.sort_by(|a, b| b.published.cmp(&a.published));
+        posts.sort_by_key(|b| std::cmp::Reverse(b.published));
         // Limit to only the 2 most recent posts
         posts.truncate(2);
 
@@ -396,7 +397,7 @@ impl Feed {
 
         // Sort the filtered posts by publication date (oldest first) for correct publication order
         // This ensures that if there are multiple new posts, the older one is published first
-        posts.sort_by(|a, b| a.published.cmp(&b.published));
+        posts.sort_by_key(|a| a.published);
 
         log::info!(
             "Selected {} feed posts for publishing from feed: {} (ordered for publication)",
@@ -446,15 +447,18 @@ pub struct FeedManager {
 }
 
 impl FeedManager {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self { feeds: Vec::new() }
     }
 
+    #[allow(dead_code)]
     pub fn add_feed(&mut self, config: FeedConfig, youtube_config: Option<YouTubeGlobalConfig>) {
         let feed = Feed::new(config, youtube_config);
         self.feeds.push(feed);
     }
 
+    #[allow(dead_code)]
     pub fn load_feeds(
         &mut self,
         configs: Vec<FeedConfig>,
@@ -513,10 +517,12 @@ impl FeedManager {
         self.feeds.iter().find(|f| f.config.id == id)
     }
 
+    #[allow(dead_code)]
     pub fn get_feed_mut(&mut self, id: &str) -> Option<&mut Feed> {
         self.feeds.iter_mut().find(|f| f.config.id == id)
     }
 
+    #[allow(dead_code)]
     pub fn list_feeds(&self) -> Vec<(&str, &str, bool)> {
         self.feeds
             .iter()
@@ -530,6 +536,7 @@ impl FeedManager {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn get_enabled_feeds_count(&self) -> usize {
         self.feeds.iter().filter(|f| f.config.enabled).count()
     }

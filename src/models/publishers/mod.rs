@@ -6,7 +6,9 @@ use std::any::Any;
 #[async_trait]
 pub trait Publisher: Send + Sync {
     async fn publish(&self, post: &Post) -> Result<String>;
+    #[allow(dead_code)]
     fn get_type(&self) -> &'static str;
+    #[allow(dead_code)]
     fn get_id(&self) -> &str;
     fn as_any(&self) -> &dyn Any;
 }

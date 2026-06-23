@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 pub struct TelegramPublisher {
+    #[allow(dead_code)]
     pub id: String,
     pub bot_token: String,
     pub chat_id: String,

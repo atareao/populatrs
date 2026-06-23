@@ -18,6 +18,7 @@ pub struct YouTubeConfig {
 pub struct YouTubeResponse {
     pub items: Vec<YouTubeVideo>,
     #[serde(rename = "nextPageToken")]
+    #[allow(dead_code)]
     pub next_page_token: Option<String>,
 }
 
@@ -52,8 +53,10 @@ pub struct VideoSnippet {
     pub published_at: String,
     pub title: String,
     pub description: String,
+    #[allow(dead_code)]
     pub thumbnails: HashMap<String, Thumbnail>,
     #[serde(rename = "channelTitle")]
+    #[allow(dead_code)]
     pub channel_title: String,
     #[serde(rename = "resourceId")]
     pub resource_id: Option<ResourceId>,
@@ -67,8 +70,11 @@ pub struct ResourceId {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Thumbnail {
+    #[allow(dead_code)]
     pub url: String,
+    #[allow(dead_code)]
     pub width: Option<u32>,
+    #[allow(dead_code)]
     pub height: Option<u32>,
 }
 
@@ -247,7 +253,7 @@ impl YouTubeClient {
         }
 
         // Sort by publication date (newest first)
-        posts.sort_by(|a, b| b.published.cmp(&a.published));
+        posts.sort_by_key(|b| std::cmp::Reverse(b.published));
 
         log::info!(
             "Filtered {} valid videos from {} total",

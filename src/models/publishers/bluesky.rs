@@ -7,6 +7,7 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 pub struct BlueskyPublisher {
+    #[allow(dead_code)]
     pub id: String,
     pub handle: String,
     pub password: String,

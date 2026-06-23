@@ -25,6 +25,7 @@ pub struct XPublisher {
 }
 
 impl XPublisher {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         client_id: String,
@@ -292,16 +293,14 @@ impl XPublisher {
             let mut config = StorageManager::load_config_from_file(config_path)?;
 
             // Actualizar el publisher X específico
-            if let Some(publisher_config) = config.publishers.get_mut(&self.id) {
-                if let crate::models::config::PublisherConfig::X {
-                    access_token: ref mut at,
-                    refresh_token: ref mut rt,
-                    ..
-                } = publisher_config
-                {
-                    *at = Some(access_token.to_string());
-                    *rt = refresh_token.map(|t| t.to_string());
-                }
+            if let Some(crate::models::config::PublisherConfig::X {
+                access_token: ref mut at,
+                refresh_token: ref mut rt,
+                ..
+            }) = config.publishers.get_mut(&self.id)
+            {
+                *at = Some(access_token.to_string());
+                *rt = refresh_token.map(|t| t.to_string());
             }
 
             // Guardar configuración actualizada

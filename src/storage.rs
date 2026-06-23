@@ -113,6 +113,7 @@ impl StorageManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn backup_published_posts(&self) -> Result<()> {
         let source_path = Path::new(&self.data_dir).join(&self.published_posts_file);
         if !source_path.exists() {

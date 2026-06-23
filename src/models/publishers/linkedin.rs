@@ -25,6 +25,7 @@ pub struct LinkedInPublisher {
 }
 
 impl LinkedInPublisher {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         client_id: String,
@@ -240,16 +241,14 @@ impl LinkedInPublisher {
         if let Some(config_path) = &self.config_file_path {
             let mut config = StorageManager::load_config_from_file(config_path)?;
 
-            if let Some(publisher_config) = config.publishers.get_mut(&self.id) {
-                if let crate::models::config::PublisherConfig::LinkedIn {
-                    access_token: ref mut at,
-                    refresh_token: ref mut rt,
-                    ..
-                } = publisher_config
-                {
-                    *at = Some(access_token.to_string());
-                    *rt = refresh_token.map(|s| s.to_string());
-                }
+            if let Some(crate::models::config::PublisherConfig::LinkedIn {
+                access_token: ref mut at,
+                refresh_token: ref mut rt,
+                ..
+            }) = config.publishers.get_mut(&self.id)
+            {
+                *at = Some(access_token.to_string());
+                *rt = refresh_token.map(|s| s.to_string());
             }
 
             StorageManager::save_config_to_file(&config, config_path)?;
