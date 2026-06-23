@@ -5,6 +5,11 @@
 
 - Fix clippy warnings across codebase
 - Fix clippy warnings across codebase
+
+### Miscellaneous Tasks
+
+- Release v0.1.4
+- Add crates.io publish job to release workflow
 ## [0.1.3] - 2026-06-23
 
 ### Documentation
