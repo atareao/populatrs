@@ -1,5 +1,6 @@
 # Rust
 target/
+backend/target/
 
 # IDE
 .vscode/
@@ -12,18 +13,21 @@ target/
 .DS_Store
 Thumbs.db
 
-# Application specific
-config.json
+# Application data
 data/
+*.db
+*.db-wal
+*.db-shm
 *.log
-feed_cache.json
+*.backup.*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
 
 # Docker
 .dockerignore
 
-# Backup files
-*.backup.*
-
-# Environment variables
+# Environment
 .env
 .env.local
