@@ -1,0 +1,816 @@
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use chrono::Utc;
+use rusqlite::{params, Connection, OptionalExtension};
+use tokio::sync::Mutex;
+
+use crate::models::{
+    FeedConfig, FeedTypeConfig, PublisherConfig, ScheduleConfig,
+};
+
+/// Database handle wrapping a SQLite connection.
+#[derive(Clone)]
+pub struct Database {
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl Database {
+    /// Open (or create) the SQLite database at `path` and run migrations.
+    pub async fn open(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.context("Failed to create data directory")?;
+        }
+
+        let conn = Connection::open(path).context("Failed to open SQLite database")?;
+
+        // Enable WAL mode for better concurrent access
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .context("Failed to set PRAGMAs")?;
+
+        let db = Self {
+            conn: Arc::new(Mutex::new(conn)),
+        };
+        db.run_migrations().await?;
+        Ok(db)
+    }
+
+    /// Create tables if they don't exist.
+    async fn run_migrations(&self) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS feeds (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                feed_type TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                check_interval_minutes INTEGER,
+                max_retries INTEGER,
+                retry_delay_seconds INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS publishers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                publisher_type TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS feed_publishers (
+                feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+                publisher_id TEXT NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+                PRIMARY KEY (feed_id, publisher_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS published_posts (
+                guid TEXT NOT NULL,
+                feed_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                content_hash TEXT,
+                published_at TEXT NOT NULL,
+                PRIMARY KEY (guid, feed_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS publish_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guid TEXT NOT NULL,
+                feed_id TEXT NOT NULL,
+                publisher_id TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                message TEXT,
+                published_at TEXT NOT NULL,
+                FOREIGN KEY (guid, feed_id) REFERENCES published_posts(guid, feed_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS feed_cache (
+                feed_id TEXT PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE,
+                etag TEXT,
+                last_modified TEXT,
+                last_content_hash TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            ",
+        )
+        .context("Failed to run database migrations")?;
+        Ok(())
+    }
+
+    // ───── Feeds ─────
+
+    /// List all feeds.
+    pub async fn list_feeds(&self) -> Result<Vec<FeedConfig>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, feed_type, config_json, enabled, check_interval_minutes, \
+                 max_retries, retry_delay_seconds, created_at, updated_at FROM feeds ORDER BY name",
+            )
+            .context("Failed to prepare list_feeds")?;
+
+        let feeds = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let feed_type: String = row.get(2)?;
+                let config_json: String = row.get(3)?;
+                let enabled: bool = row.get::<_, i32>(4)? != 0;
+                let check_interval: Option<i64> = row.get(5)?;
+                let max_retries: Option<i32> = row.get(6)?;
+                let retry_delay: Option<i64> = row.get(7)?;
+
+                let config: FeedTypeConfig =
+                    serde_json::from_str(&config_json).unwrap_or(FeedTypeConfig::Rss {
+                        url: String::new(),
+                    });
+
+                Ok(FeedConfig {
+                    id,
+                    name,
+                    feed_type,
+                    config,
+                    enabled,
+                    publishers: Vec::new(), // filled below
+                    check_interval_minutes: check_interval.map(|v| v as u64),
+                    max_retries: max_retries.map(|v| v as u32),
+                    retry_delay_seconds: retry_delay.map(|v| v as u64),
+                })
+            })
+            .context("Failed to query feeds")?;
+
+        let mut result = Vec::new();
+        for feed in feeds {
+            let mut feed = feed?;
+            // Load linked publishers
+            let mut pstmt = conn
+                .prepare("SELECT publisher_id FROM feed_publishers WHERE feed_id = ?1")
+                .context("Failed to prepare feed_publishers query")?;
+            let pub_ids: Vec<String> = pstmt
+                .query_map(params![&feed.id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            feed.publishers = pub_ids;
+            result.push(feed);
+        }
+        Ok(result)
+    }
+
+    /// Get a single feed by ID.
+    pub async fn get_feed(&self, id: &str) -> Result<Option<FeedConfig>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, feed_type, config_json, enabled, check_interval_minutes, \
+                 max_retries, retry_delay_seconds FROM feeds WHERE id = ?1",
+            )
+            .context("Failed to prepare get_feed")?;
+
+        let feed = stmt
+            .query_row(params![id], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let feed_type: String = row.get(2)?;
+                let config_json: String = row.get(3)?;
+                let enabled: bool = row.get::<_, i32>(4)? != 0;
+                let check_interval: Option<i64> = row.get(5)?;
+                let max_retries: Option<i32> = row.get(6)?;
+                let retry_delay: Option<i64> = row.get(7)?;
+
+                let config: FeedTypeConfig =
+                    serde_json::from_str(&config_json).unwrap_or(FeedTypeConfig::Rss {
+                        url: String::new(),
+                    });
+
+                Ok(FeedConfig {
+                    id,
+                    name,
+                    feed_type,
+                    config,
+                    enabled,
+                    publishers: Vec::new(),
+                    check_interval_minutes: check_interval.map(|v| v as u64),
+                    max_retries: max_retries.map(|v| v as u32),
+                    retry_delay_seconds: retry_delay.map(|v| v as u64),
+                })
+            })
+            .optional()
+            .context("Failed to query feed")?;
+
+        if let Some(mut feed) = feed {
+            let mut pstmt = conn
+                .prepare("SELECT publisher_id FROM feed_publishers WHERE feed_id = ?1")?;
+            let pub_ids: Vec<String> = pstmt
+                .query_map(params![id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            feed.publishers = pub_ids;
+            Ok(Some(feed))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Create a new feed.
+    pub async fn create_feed(&self, feed: &FeedConfig) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let config_json = serde_json::to_string(&feed.config).context("Failed to serialize feed config")?;
+
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO feeds (id, name, feed_type, config_json, enabled, check_interval_minutes, \
+             max_retries, retry_delay_seconds, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                feed.id,
+                feed.name,
+                feed.feed_type,
+                config_json,
+                feed.enabled as i32,
+                feed.check_interval_minutes.map(|v| v as i64),
+                feed.max_retries.map(|v| v as i32),
+                feed.retry_delay_seconds.map(|v| v as i64),
+                now,
+                now,
+            ],
+        )
+        .context("Failed to insert feed")?;
+
+        // Link publishers
+        for pub_id in &feed.publishers {
+            conn.execute(
+                "INSERT OR IGNORE INTO feed_publishers (feed_id, publisher_id) VALUES (?1, ?2)",
+                params![feed.id, pub_id],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Update an existing feed.
+    pub async fn update_feed(&self, id: &str, feed: &FeedConfig) -> Result<bool> {
+        let now = Utc::now().to_rfc3339();
+        let config_json = serde_json::to_string(&feed.config).context("Failed to serialize feed config")?;
+
+        let conn = self.conn.lock().await;
+        let rows = conn
+            .execute(
+                "UPDATE feeds SET name = ?1, feed_type = ?2, config_json = ?3, enabled = ?4, \
+                 check_interval_minutes = ?5, max_retries = ?6, retry_delay_seconds = ?7, updated_at = ?8 \
+                 WHERE id = ?9",
+                params![
+                    feed.name,
+                    feed.feed_type,
+                    config_json,
+                    feed.enabled as i32,
+                    feed.check_interval_minutes.map(|v| v as i64),
+                    feed.max_retries.map(|v| v as i32),
+                    feed.retry_delay_seconds.map(|v| v as i64),
+                    now,
+                    id,
+                ],
+            )
+            .context("Failed to update feed")?;
+
+        if rows == 0 {
+            return Ok(false);
+        }
+
+        // Update publisher links
+        conn.execute(
+            "DELETE FROM feed_publishers WHERE feed_id = ?1",
+            params![id],
+        )?;
+        for pub_id in &feed.publishers {
+            conn.execute(
+                "INSERT OR IGNORE INTO feed_publishers (feed_id, publisher_id) VALUES (?1, ?2)",
+                params![id, pub_id],
+            )?;
+        }
+
+        Ok(true)
+    }
+
+    /// Delete a feed by ID.
+    pub async fn delete_feed(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let rows = conn
+            .execute("DELETE FROM feeds WHERE id = ?1", params![id])
+            .context("Failed to delete feed")?;
+        Ok(rows > 0)
+    }
+
+    /// Toggle feed enabled/disabled.
+    pub async fn toggle_feed(&self, id: &str) -> Result<Option<bool>> {
+        let conn = self.conn.lock().await;
+        let now = Utc::now().to_rfc3339();
+        let rows = conn
+            .execute(
+                "UPDATE feeds SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END, updated_at = ?1 WHERE id = ?2",
+                params![now, id],
+            )
+            .context("Failed to toggle feed")?;
+        if rows == 0 {
+            return Ok(None);
+        }
+        let enabled: bool = conn
+            .query_row("SELECT enabled FROM feeds WHERE id = ?1", params![id], |row| {
+                row.get::<_, i32>(0).map(|v| v != 0)
+            })
+            .optional()
+            .context("Failed to read feed after toggle")?
+            .unwrap_or(false);
+        Ok(Some(enabled))
+    }
+
+    // ───── Publishers ─────
+
+    /// List all publishers.
+    pub async fn list_publishers(&self) -> Result<HashMap<String, PublisherConfig>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, publisher_type, config_json, enabled FROM publishers ORDER BY name",
+            )
+            .context("Failed to prepare list_publishers")?;
+
+        let publishers = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let ptype: String = row.get(1)?;
+                let config_json: String = row.get(2)?;
+                let _enabled: bool = row.get::<_, i32>(3)? != 0;
+                Ok((id, ptype, config_json))
+            })
+            .context("Failed to query publishers")?;
+
+        let mut result = HashMap::new();
+        for entry in publishers {
+            let (id, ptype, config_json) = entry?;
+            // Deserialize based on type tag
+            let tagged = serde_json::from_str::<serde_json::Value>(&config_json).ok();
+            let config = match ptype.as_str() {
+                "telegram" => Some(PublisherConfig::Telegram {
+                    bot_token: tagged.as_ref().and_then(|v| v.get("bot_token")?.as_str().map(String::from)).unwrap_or_default(),
+                    chat_id: tagged.as_ref().and_then(|v| v.get("chat_id")?.as_str().map(String::from)).unwrap_or_default(),
+                    parse_mode: tagged.as_ref().and_then(|v| v.get("parse_mode")?.as_str().map(String::from)),
+                    message_thread_id: tagged.as_ref().and_then(|v| v.get("message_thread_id")?.as_str().map(String::from)),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "x" => Some(PublisherConfig::X {
+                    client_id: tagged.as_ref().and_then(|v| v.get("client_id")?.as_str().map(String::from)).unwrap_or_default(),
+                    client_secret: tagged.as_ref().and_then(|v| v.get("client_secret")?.as_str().map(String::from)).unwrap_or_default(),
+                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)),
+                    refresh_token: tagged.as_ref().and_then(|v| v.get("refresh_token")?.as_str().map(String::from)),
+                    redirect_uri: tagged.as_ref().and_then(|v| v.get("redirect_uri")?.as_str().map(String::from)),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "mastodon" => Some(PublisherConfig::Mastodon {
+                    server_url: tagged.as_ref().and_then(|v| v.get("server_url")?.as_str().map(String::from)).unwrap_or_default(),
+                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "linkedin" => Some(PublisherConfig::LinkedIn {
+                    client_id: tagged.as_ref().and_then(|v| v.get("client_id")?.as_str().map(String::from)).unwrap_or_default(),
+                    client_secret: tagged.as_ref().and_then(|v| v.get("client_secret")?.as_str().map(String::from)).unwrap_or_default(),
+                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)),
+                    refresh_token: tagged.as_ref().and_then(|v| v.get("refresh_token")?.as_str().map(String::from)),
+                    user_id: tagged.as_ref().and_then(|v| v.get("user_id")?.as_str().map(String::from)),
+                    redirect_uri: tagged.as_ref().and_then(|v| v.get("redirect_uri")?.as_str().map(String::from)),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "openobserve" => Some(PublisherConfig::OpenObserve {
+                    url: tagged.as_ref().and_then(|v| v.get("url")?.as_str().map(String::from)).unwrap_or_default(),
+                    organization: tagged.as_ref().and_then(|v| v.get("organization")?.as_str().map(String::from)).unwrap_or_default(),
+                    stream_name: tagged.as_ref().and_then(|v| v.get("stream_name")?.as_str().map(String::from)).unwrap_or_default(),
+                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "matrix" => Some(PublisherConfig::Matrix {
+                    homeserver_url: tagged.as_ref().and_then(|v| v.get("homeserver_url")?.as_str().map(String::from)).unwrap_or_default(),
+                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
+                    room_id: tagged.as_ref().and_then(|v| v.get("room_id")?.as_str().map(String::from)).unwrap_or_default(),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "bluesky" => Some(PublisherConfig::Bluesky {
+                    handle: tagged.as_ref().and_then(|v| v.get("handle")?.as_str().map(String::from)).unwrap_or_default(),
+                    password: tagged.as_ref().and_then(|v| v.get("password")?.as_str().map(String::from)).unwrap_or_default(),
+                    pds_url: tagged.as_ref().and_then(|v| v.get("pds_url")?.as_str().map(String::from)),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "threads" => Some(PublisherConfig::Threads {
+                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
+                    user_id: tagged.as_ref().and_then(|v| v.get("user_id")?.as_str().map(String::from)).unwrap_or_default(),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                "discord" => Some(PublisherConfig::Discord {
+                    webhook_url: tagged.as_ref().and_then(|v| v.get("webhook_url")?.as_str().map(String::from)).unwrap_or_default(),
+                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
+                }),
+                _ => None,
+            };
+
+            if let Some(config) = config {
+                result.insert(id, config);
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get a single publisher config by ID.
+    pub async fn get_publisher(&self, id: &str) -> Result<Option<PublisherConfig>> {
+        let publishers = self.list_publishers().await?;
+        Ok(publishers.into_iter().find(|(k, _)| k == id).map(|(_, v)| v))
+    }
+
+    /// Create or update a publisher.
+    pub async fn upsert_publisher(&self, id: &str, config: &PublisherConfig) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let ptype = config.type_name().to_lowercase();
+        let config_json = serde_json::to_string(config).context("Failed to serialize publisher config")?;
+        let name = id.to_string();
+
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO publishers (id, name, publisher_type, config_json, enabled, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6) \
+             ON CONFLICT(id) DO UPDATE SET \
+             name = excluded.name, publisher_type = excluded.publisher_type, \
+             config_json = excluded.config_json, updated_at = excluded.updated_at",
+            params![id, name, ptype, config_json, now, now],
+        )
+        .context("Failed to upsert publisher")?;
+        Ok(())
+    }
+
+    /// Delete a publisher by ID.
+    pub async fn delete_publisher(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let rows = conn
+            .execute("DELETE FROM publishers WHERE id = ?1", params![id])
+            .context("Failed to delete publisher")?;
+        Ok(rows > 0)
+    }
+
+    // ───── Published Posts ─────
+
+    /// Check if a post has been published.
+    pub async fn is_post_published(&self, guid: &str, feed_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM published_posts WHERE guid = ?1 AND feed_id = ?2",
+                params![guid, feed_id],
+                |_| Ok(true),
+            )
+            .optional()
+            .context("Failed to check published post")?
+            .unwrap_or(false);
+        Ok(exists)
+    }
+
+    /// Mark a post as published.
+    pub async fn mark_post_published(
+        &self,
+        guid: &str,
+        feed_id: &str,
+        title: &str,
+        url: &str,
+        content_hash: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR IGNORE INTO published_posts (guid, feed_id, title, url, content_hash, published_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![guid, feed_id, title, url, content_hash, now],
+        )
+        .context("Failed to mark post as published")?;
+        Ok(())
+    }
+
+    /// Record a publish result for a specific publisher.
+    pub async fn record_publish_result(
+        &self,
+        guid: &str,
+        feed_id: &str,
+        publisher_id: &str,
+        success: bool,
+        message: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO publish_results (guid, feed_id, publisher_id, success, message, published_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![guid, feed_id, publisher_id, success as i32, message, now],
+        )
+        .context("Failed to record publish result")?;
+        Ok(())
+    }
+
+    /// Clean up old published posts (older than `days`).
+    pub async fn cleanup_old_posts(&self, days: i64) -> Result<u64> {
+        let conn = self.conn.lock().await;
+        let cutoff = (Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        let deleted = conn
+            .execute(
+                "DELETE FROM published_posts WHERE published_at < ?1",
+                params![cutoff],
+            )
+            .context("Failed to cleanup old posts")?;
+        Ok(deleted as u64)
+    }
+
+    // ───── Feed Cache ─────
+
+    /// Get cached ETag for a feed.
+    pub async fn get_feed_cache(&self, feed_id: &str) -> Result<Option<(Option<String>, Option<String>, Option<String>)>> {
+        let conn = self.conn.lock().await;
+        let result = conn
+            .query_row(
+                "SELECT etag, last_modified, last_content_hash FROM feed_cache WHERE feed_id = ?1",
+                params![feed_id],
+                |row| {
+                    Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?))
+                },
+            )
+            .optional()
+            .context("Failed to query feed cache")?;
+        Ok(result)
+    }
+
+    /// Update feed cache.
+    pub async fn upsert_feed_cache(
+        &self,
+        feed_id: &str,
+        etag: Option<&str>,
+        last_modified: Option<&str>,
+        last_content_hash: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO feed_cache (feed_id, etag, last_modified, last_content_hash) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(feed_id) DO UPDATE SET \
+             etag = excluded.etag, last_modified = excluded.last_modified, \
+             last_content_hash = excluded.last_content_hash",
+            params![feed_id, etag, last_modified, last_content_hash],
+        )
+        .context("Failed to upsert feed cache")?;
+        Ok(())
+    }
+
+    // ───── Settings ─────
+
+    /// Get a setting value.
+    pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let value = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Failed to query setting")?;
+        Ok(value)
+    }
+
+    /// Set a setting value.
+    pub async fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )
+        .context("Failed to set setting")?;
+        Ok(())
+    }
+
+    /// Get schedule configuration (from settings table).
+    pub async fn get_schedule(&self) -> Result<ScheduleConfig> {
+        let interval = self
+            .get_setting("schedule_interval")
+            .await?
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(60);
+        let timezone = self
+            .get_setting("schedule_timezone")
+            .await?
+            .unwrap_or_else(|| "UTC".to_string());
+        Ok(ScheduleConfig {
+            default_interval_minutes: interval,
+            timezone,
+        })
+    }
+
+    /// Update schedule configuration.
+    pub async fn set_schedule(&self, schedule: &ScheduleConfig) -> Result<()> {
+        self.set_setting("schedule_interval", &schedule.default_interval_minutes.to_string())
+            .await?;
+        self.set_setting("schedule_timezone", &schedule.timezone)
+            .await?;
+        Ok(())
+    }
+
+    // ───── Stats ─────
+
+    /// Get dashboard stats.
+    pub async fn get_stats(&self) -> Result<Stats> {
+        let conn = self.conn.lock().await;
+        let total_feeds: i64 = conn
+            .query_row("SELECT COUNT(*) FROM feeds", [], |row| row.get(0))?;
+        let enabled_feeds: i64 = conn
+            .query_row("SELECT COUNT(*) FROM feeds WHERE enabled = 1", [], |row| {
+                row.get(0)
+            })?;
+        let total_publishers: i64 = conn
+            .query_row("SELECT COUNT(*) FROM publishers", [], |row| row.get(0))?;
+        let total_published: i64 = conn
+            .query_row("SELECT COUNT(*) FROM published_posts", [], |row| row.get(0))?;
+        let schedule = self.get_schedule().await?;
+
+        Ok(Stats {
+            total_feeds: total_feeds as u64,
+            enabled_feeds: enabled_feeds as u64,
+            total_publishers: total_publishers as u64,
+            total_published: total_published as u64,
+            schedule,
+        })
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Stats {
+    pub total_feeds: u64,
+    pub enabled_feeds: u64,
+    pub total_publishers: u64,
+    pub total_published: u64,
+    pub schedule: ScheduleConfig,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    async fn test_db() -> (Database, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.db");
+        let db = Database::open(&path).await.unwrap();
+        (db, dir)
+    }
+
+    #[tokio::test]
+    async fn test_create_and_list_feeds() {
+        let (db, _dir) = test_db().await;
+        let feed = FeedConfig {
+            id: "test-feed".into(),
+            name: "Test Feed".into(),
+            feed_type: "rss".into(),
+            config: FeedTypeConfig::Rss { url: "https://example.com/feed.xml".into() },
+            enabled: true,
+            publishers: vec![],
+            check_interval_minutes: Some(30),
+            max_retries: Some(3),
+            retry_delay_seconds: Some(5),
+        };
+        db.create_feed(&feed).await.unwrap();
+        let feeds = db.list_feeds().await.unwrap();
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds[0].id, "test-feed");
+        assert_eq!(feeds[0].name, "Test Feed");
+    }
+
+    #[tokio::test]
+    async fn test_get_feed_not_found() {
+        let (db, _dir) = test_db().await;
+        let feed = db.get_feed("nonexistent").await.unwrap();
+        assert!(feed.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_feed() {
+        let (db, _dir) = test_db().await;
+        let feed = FeedConfig {
+            id: "feed-1".into(),
+            name: "Original".into(),
+            feed_type: "rss".into(),
+            config: FeedTypeConfig::Rss { url: "https://ex.com/feed.xml".into() },
+            enabled: true,
+            publishers: vec![],
+            check_interval_minutes: None,
+            max_retries: None,
+            retry_delay_seconds: None,
+        };
+        db.create_feed(&feed).await.unwrap();
+
+        let updated = FeedConfig {
+            name: "Updated".into(),
+            ..feed
+        };
+        db.update_feed("feed-1", &updated).await.unwrap();
+        let fetched = db.get_feed("feed-1").await.unwrap().unwrap();
+        assert_eq!(fetched.name, "Updated");
+    }
+
+    #[tokio::test]
+    async fn test_delete_feed() {
+        let (db, _dir) = test_db().await;
+        let feed = FeedConfig {
+            id: "to-delete".into(),
+            name: "Delete Me".into(),
+            feed_type: "rss".into(),
+            config: FeedTypeConfig::Rss { url: "https://ex.com/feed.xml".into() },
+            enabled: true,
+            publishers: vec![],
+            check_interval_minutes: None,
+            max_retries: None,
+            retry_delay_seconds: None,
+        };
+        db.create_feed(&feed).await.unwrap();
+        assert!(db.delete_feed("to-delete").await.unwrap());
+        assert!(db.get_feed("to-delete").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_toggle_feed() {
+        let (db, _dir) = test_db().await;
+        let feed = FeedConfig {
+            id: "toggle-me".into(),
+            name: "Toggle".into(),
+            feed_type: "rss".into(),
+            config: FeedTypeConfig::Rss { url: "https://ex.com/feed.xml".into() },
+            enabled: true,
+            publishers: vec![],
+            check_interval_minutes: None,
+            max_retries: None,
+            retry_delay_seconds: None,
+        };
+        db.create_feed(&feed).await.unwrap();
+        let enabled = db.toggle_feed("toggle-me").await.unwrap();
+        assert_eq!(enabled, Some(false));
+        let enabled = db.toggle_feed("toggle-me").await.unwrap();
+        assert_eq!(enabled, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_publishers_roundtrip() {
+        let (db, _dir) = test_db().await;
+        let config = PublisherConfig::Telegram {
+            bot_token: "123:abc".into(),
+            chat_id: "-100".into(),
+            parse_mode: Some("HTML".into()),
+            message_thread_id: None,
+            template: None,
+        };
+        db.upsert_publisher("telegram-1", &config).await.unwrap();
+        let publishers = db.list_publishers().await.unwrap();
+        assert_eq!(publishers.len(), 1);
+        assert!(publishers.contains_key("telegram-1"));
+    }
+
+    #[tokio::test]
+    async fn test_published_posts() {
+        let (db, _dir) = test_db().await;
+        assert!(!db.is_post_published("guid-1", "feed-1").await.unwrap());
+        db.mark_post_published("guid-1", "feed-1", "Test Post", "https://ex.com", None)
+            .await
+            .unwrap();
+        assert!(db.is_post_published("guid-1", "feed-1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_settings() {
+        let (db, _dir) = test_db().await;
+        db.set_setting("test_key", "test_value").await.unwrap();
+        let val = db.get_setting("test_key").await.unwrap();
+        assert_eq!(val, Some("test_value".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_schedule() {
+        let (db, _dir) = test_db().await;
+        let sched = ScheduleConfig {
+            default_interval_minutes: 30,
+            timezone: "Europe/Madrid".into(),
+        };
+        db.set_schedule(&sched).await.unwrap();
+        let loaded = db.get_schedule().await.unwrap();
+        assert_eq!(loaded.default_interval_minutes, 30);
+        assert_eq!(loaded.timezone, "Europe/Madrid");
+    }
+}

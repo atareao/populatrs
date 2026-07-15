@@ -1,0 +1,143 @@
+import { theme as antdTheme, type ConfigProviderProps } from "antd";
+
+const theme: ConfigProviderProps["theme"] = {
+  algorithm: antdTheme.darkAlgorithm,
+  token: {
+    colorPrimary: "#2563eb",
+    colorSuccess: "#22c55e",
+    colorWarning: "#eab308",
+    colorError: "#ef4444",
+    colorInfo: "#6366f1",
+    colorBgBase: "#08080e",
+    colorBgContainer: "#111118",
+    colorBgElevated: "#181825",
+    colorBgLayout: "#08080e",
+    colorBgSpotlight: "#1e1e30",
+    colorBorder: "#2a2a3e",
+    colorBorderSecondary: "#1e1e2e",
+    colorTextBase: "#ececf1",
+    colorTextSecondary: "#9494a8",
+    colorTextTertiary: "#64647a",
+    borderRadius: 8,
+    borderRadiusLG: 12,
+    borderRadiusSM: 6,
+    fontFamily:
+      "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+    fontSize: 14,
+    fontSizeHeading1: 28,
+    fontSizeHeading2: 22,
+    fontSizeHeading3: 18,
+    fontSizeHeading4: 16,
+    fontSizeHeading5: 14,
+    lineHeight: 1.6,
+    controlHeight: 36,
+    controlHeightLG: 44,
+    controlHeightSM: 28,
+    boxShadow: "0 1px 3px 0 rgba(0,0,0,0.3), 0 1px 2px -1px rgba(0,0,0,0.3)",
+    boxShadowSecondary: "0 4px 12px rgba(0,0,0,0.4)",
+    motionDurationMid: "0.2s",
+    motionEaseInOut: "cubic-bezier(0.4, 0, 0.2, 1)",
+  },
+  components: {
+    Layout: {
+      headerBg: "#0c0c14",
+      bodyBg: "#08080e",
+      siderBg: "#0c0c14",
+      triggerBg: "#181825",
+      triggerHeight: 48,
+    },
+    Menu: {
+      itemBg: "transparent",
+      itemColor: "#9494a8",
+      itemHoverBg: "#181825",
+      itemHoverColor: "#ececf1",
+      itemSelectedBg: "rgba(37, 99, 235, 0.12)",
+      itemSelectedColor: "#60a5fa",
+      itemActiveBg: "rgba(37, 99, 235, 0.08)",
+      subMenuItemBg: "transparent",
+      groupTitleColor: "#64647a",
+      fontSize: 14,
+      controlHeightLG: 44,
+      itemMarginInline: 8,
+      itemBorderRadius: 8,
+    },
+    Card: {
+      colorBgContainer: "#111118",
+      paddingLG: 20,
+      borderRadiusLG: 10,
+    },
+    Table: {
+      colorBgContainer: "#111118",
+      headerBg: "#0c0c14",
+      headerColor: "#9494a8",
+      rowHoverBg: "#181825",
+      borderColor: "#1e1e2e",
+      padding: 14,
+      fontSize: 13,
+    },
+    Modal: {
+      contentBg: "#111118",
+      headerBg: "#111118",
+      footerBg: "#111118",
+    },
+    Input: {
+      colorBgContainer: "#181825",
+      colorBgContainerDisabled: "#111118",
+      addonBg: "#181825",
+      activeShadow: "0 0 0 2px rgba(37, 99, 235, 0.15)",
+    },
+    Select: {
+      colorBgContainer: "#181825",
+      colorBgElevated: "#181825",
+      optionSelectedBg: "rgba(37, 99, 235, 0.12)",
+      optionActiveBg: "#1e1e30",
+    },
+    Button: {
+      primaryShadow: "0 1px 2px rgba(0,0,0,0.3)",
+      defaultBg: "#181825",
+      defaultBorderColor: "#2a2a3e",
+      defaultColor: "#ececf1",
+      defaultHoverBg: "#1e1e30",
+      defaultHoverBorderColor: "#3a3a5e",
+      defaultActiveBg: "#1e1e30",
+    },
+    Tag: {
+      defaultBg: "rgba(148, 148, 168, 0.08)",
+      defaultColor: "#9494a8",
+    },
+    Badge: {
+      colorBgContainer: "#181825",
+    },
+    Timeline: {
+      dotBg: "#111118",
+      tailColor: "#2a2a3e",
+      itemPaddingBottom: 20,
+    },
+    Descriptions: {
+      labelBg: "#0c0c14",
+      titleColor: "#ececf1",
+    },
+    DatePicker: {
+      colorBgContainer: "#181825",
+      activeShadow: "0 0 0 2px rgba(37, 99, 235, 0.15)",
+    },
+    Alert: {
+      colorIcon: "#9494a8",
+    },
+    Notification: {
+      colorBgElevated: "#181825",
+    },
+    Collapse: {
+      colorBgContainer: "#111118",
+      headerBg: "#0c0c14",
+    },
+    Skeleton: {
+      color: "#181825",
+    },
+    Spin: {
+      colorPrimary: "#60a5fa",
+    },
+  },
+};
+
+export default theme;

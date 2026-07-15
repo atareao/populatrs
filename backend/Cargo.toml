@@ -1,0 +1,77 @@
+[package]
+name = "populatrs"
+version = "0.2.0"
+edition = "2021"
+description = "Automated RSS feed publisher for multiple social platforms"
+license = "MIT"
+repository = "https://github.com/atareao/populatrs"
+
+[[bin]]
+name = "populatrs"
+path = "src/main.rs"
+
+[lib]
+name = "populatrs"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.52", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+
+# Web framework
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.7", features = ["cors", "trace", "fs"] }
+tower = "0.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = [
+    "json", "rustls-tls",
+] }
+
+# OIDC / Auth
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+base64 = "0.22"
+cookie = "0.18"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Feeds
+rss = "2.0"
+feed-rs = "2.3"
+roxmltree = "0.21"
+
+# Templating
+minijinja = "2.19"
+
+# Crypto (OAuth PKCE / HMAC)
+hmac = "0.13"
+sha1 = "0.11"
+md5 = "0.8"
+
+# Time & scheduling
+chrono = { version = "0.4", features = ["serde"] }
+tokio-cron-scheduler = "0.15"
+
+# General
+clap = { version = "4.6", features = ["derive"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }
+anyhow = "1.0"
+regex = "1.12"
+url = "2.5"
+
+dotenvy = "0.15"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
