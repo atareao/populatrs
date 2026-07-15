@@ -10,8 +10,9 @@ This project follows strict gitflow. See [GIT_FLOW.md](./GIT_FLOW.md) for:
 ```
 populatrs/
 ├── backend/                # Único crate Rust
-│   ├── Cargo.toml          # Dependencias unificadas
+│   ├── Cargo.toml          # Dependencias (v0.2.0)
 │   ├── Cargo.lock
+│   ├── run.sh              # Script de desarrollo
 │   └── src/
 │       ├── main.rs         # Servidor Axum + scheduler
 │       ├── lib.rs          # Lógica compartida (run_feed_check)
@@ -19,25 +20,51 @@ populatrs/
 │       ├── db.rs           # SQLite (migraciones + CRUD)
 │       ├── models.rs       # Tipos de datos
 │       ├── feed.rs         # RSS / YouTube fetching
-│       ├── publisher/      # 9 publishers (Telegram, X, Mastodon...)
 │       ├── template.rs     # Template rendering (minijinja)
 │       ├── auth.rs         # OIDC PocketID + JWT validator
 │       ├── middleware.rs   # Auth middleware
-│       ├── embed.rs        # Frontend embebido (rust-embed)
-│       └── routes/         # API endpoints (feeds, publishers, schedule, status)
+│       ├── embed.rs        # Frontend servido desde disco (tokio::fs)
+│       ├── publisher/      # 9 publishers (bluesky, discord, linkedin,
+│       │                   #   mastodon, matrix, openobserve, telegram,
+│       │                   #   threads, x)
+│       └── routes/         # API endpoints
+│           ├── mod.rs      # Router principal (públicas + protegidas)
+│           ├── auth_routes.rs  # Login OIDC + dev-login
+│           ├── feeds.rs    # CRUD + run de feeds
+│           ├── publishers.rs   # List + update de publishers
+│           ├── schedule.rs # GET/PUT schedule
+│           ├── status.rs   # Dashboard status
+│           └── storage.rs  # Config de almacenamiento
 ├── frontend/               # React + Vite + TypeScript
 │   ├── package.json
+│   ├── pnpm-lock.yaml
+│   ├── pnpm-workspace.yaml
+│   ├── .npmrc
 │   ├── vite.config.ts
+│   ├── index.html
+│   ├── dist/               # Build de producción
 │   └── src/
+│       ├── main.tsx        # Entry point
 │       ├── App.tsx         # Router principal
 │       ├── theme.ts        # Tema oscuro Ant Design
-│       ├── pages/          # Dashboard, Feeds, Publishers, etc.
-│       ├── components/     # Layout, etc.
-│       └── store/          # Auth state (sessionStorage)
-├── Dockerfile              # Multi-stage build (frontend + backend)
-├── populatrs.container.example  # Podman Quadlet
+│       ├── global.css      # Estilos globales
+│       ├── api/            # Cliente HTTP (http.ts)
+│       ├── components/     # Componentes (AppLayout.tsx)
+│       ├── hooks/          # Hooks (useAuth.ts)
+│       ├── pages/          # Dashboard, Feeds, Publishers, Schedule,
+│       │                   #   Settings, LoginPage, OAuthCallback, LogsPage
+│       ├── store/          # Auth state (auth.ts)
+│       └── test/           # Tests (setup.ts + tests por página)
+├── .justfile               # Task runner (just) — build, push, version
+├── .vampus.yml             # Version management
+├── Dockerfile              # Multi-stage build (Rust → Node → Alpine)
+├── populatrs.container     # Podman Quadlet (producción)
+├── populatrs.container.example  # Podman Quadlet de ejemplo
+├── populatrs.env           # Env vars para Quadlet
 ├── AGENTS.md
 ├── GIT_FLOW.md
+├── CHANGELOG.md
+├── cliff.toml              # Changelog generation config
 └── README.md
 ```
 
@@ -60,15 +87,27 @@ OIDC_ISSUER_URL=https://pocketid.example.com \
 
 # Tests
 cargo test
-cargo clippy
+cargo clippy -- -D warnings
+cargo fmt -- --check
 ```
 
 ### Frontend
 
 ```bash
 cd frontend
-npm install
-npm run dev   # Puerto 5173, proxy a backend en :8080
+pnpm install
+pnpm dev          # Puerto 5173, proxy a backend en :8080
+pnpm build        # Build producción → dist/
+pnpm test         # Tests con Vitest
+```
+
+### Just (task runner)
+
+```bash
+just list     # Lista recetas disponibles
+just build    # Build imagen Podman
+just push     # Push a registry
+just version  # Bump patch + tag
 ```
 
 ## Variables de entorno
@@ -121,7 +160,9 @@ el intervalo configurado.
 4. Registrar resultados en `publish_results`
 5. Marcar post como publicado en `published_posts`
 
-## Docker
+## Despliegue
+
+### Docker
 
 ```bash
 docker build -t populatrs:latest .
@@ -130,3 +171,25 @@ docker run -p 8080:8080 \
   -e DATABASE_URL=/app/data/populatrs.db \
   populatrs:latest
 ```
+
+### Podman Quadlet (producción)
+
+```bash
+# Copiar archivos a ~/.config/containers/systemd/
+cp populatrs.container ~/.config/containers/systemd/
+cp populatrs.env ~/.config/containers/systemd/
+
+# Recargar y arrancar
+systemctl --user daemon-reload
+systemctl --user start populatrs
+
+# Estado
+systemctl --user status populatrs
+```
+
+## Notas técnicas
+
+- **Frontend estático**: Ya no se embebe con `rust-embed`. El servidor sirve archivos desde `./dist/` con `tokio::fs::read`.
+- **pnpm**: El frontend usa pnpm workspaces, no npm.
+- **Auth**: OIDC obligatorio en producción (PocketID). En desarrollo hay bypass automático.
+- **Quadlet**: Único estándar de despliegue. No usar docker-compose ni podman-compose.

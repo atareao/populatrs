@@ -34,6 +34,7 @@ export interface StorageConfig {
 export interface DashboardStatus {
   feeds: { total: number; enabled: number; disabled: number };
   publishers: { total: number };
+  published_posts: number;
   schedule: { interval_minutes: number; timezone: string };
   storage: { data_dir: string; published_posts_file: string };
 }

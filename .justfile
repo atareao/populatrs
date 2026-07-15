@@ -1,4 +1,3 @@
-registry := "docker.io"
 user     := "atareao"
 name     := `basename ${PWD}`
 version  := `vampus show`
@@ -21,9 +20,9 @@ upgrade:
 
 build:
     @podman build \
-        --tag {{registry}}/{{user}}/{{name}}:{{version}} \
-        --tag {{registry}}/{{user}}/{{name}}:latest .
+        --tag {{user}}/{{name}}:{{version}} \
+        --tag {{user}}/{{name}}:latest .
 
 push:
-    @podman push {{registry}}/{{user}}/{{name}}:{{version}}
-    @podman push {{registry}}/{{user}}/{{name}}:latest
+    @podman push {{user}}/{{name}}:{{version}}
+    @podman push {{user}}/{{name}}:latest

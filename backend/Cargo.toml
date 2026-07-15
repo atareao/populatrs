@@ -69,8 +69,7 @@ uuid = { version = "1.23", features = ["v4", "serde"] }
 anyhow = "1.0"
 regex = "1.12"
 url = "2.5"
-rust-embed = "8"
-mime_guess = "2"
+
 dotenvy = "0.15"
 async-trait = "0.1"
 

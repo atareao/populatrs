@@ -3,6 +3,7 @@ pub mod feeds;
 pub mod publishers;
 pub mod schedule;
 pub mod status;
+pub mod storage;
 
 use std::sync::Arc;
 
@@ -48,6 +49,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
             routing::put(publishers::update_by_id),
         )
         .route("/api/schedule", routing::get(schedule::get).put(schedule::update))
+        .route("/api/storage", routing::get(storage::get).put(storage::update))
         .route("/api/status", routing::get(status::dashboard))
         .layer(middleware::from_fn(require_auth));
 

@@ -9,6 +9,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const FeedList = lazy(() => import("./pages/Feeds/FeedList"));
 const PublisherList = lazy(() => import("./pages/Publishers/PublisherList"));
 const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
+const Schedule = lazy(() => import("./pages/Schedule"));
 const Settings = lazy(() => import("./pages/Settings"));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -57,7 +58,7 @@ export default function App() {
         <Route index element={<SuspenseWrapper><Dashboard /></SuspenseWrapper>} />
         <Route path="feeds" element={<SuspenseWrapper><FeedList /></SuspenseWrapper>} />
         <Route path="publishers" element={<SuspenseWrapper><PublisherList /></SuspenseWrapper>} />
-        <Route path="schedule" element={<SuspenseWrapper><Settings /></SuspenseWrapper>} />
+        <Route path="schedule" element={<SuspenseWrapper><Schedule /></SuspenseWrapper>} />
         <Route path="settings" element={<SuspenseWrapper><Settings /></SuspenseWrapper>} />
       </Route>
     </Routes>

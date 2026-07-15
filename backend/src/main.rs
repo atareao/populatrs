@@ -137,7 +137,7 @@ async fn main() {
         }))
         .fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
-            serve_embedded(&path)
+            serve_embedded(&path).await
         })
         .with_state(app_state.clone());
 

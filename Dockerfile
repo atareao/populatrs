@@ -1,17 +1,5 @@
 # ═══════════════════════════════════════════════════════════════
-# Stage 1: Frontend (Node)
-# ═══════════════════════════════════════════════════════════════
-FROM docker.io/library/node:23-alpine AS frontend-builder
-
-WORKDIR /build
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-
-COPY frontend/ ./
-RUN npm run build
-
-# ═══════════════════════════════════════════════════════════════
-# Stage 2: Backend (Rust)
+# Stage 1: Backend (Rust)
 # ═══════════════════════════════════════════════════════════════
 FROM docker.io/library/rust:alpine3.23 AS backend-builder
 
@@ -24,19 +12,32 @@ RUN apk add --no-cache --update \
 
 WORKDIR /build
 
-# Cache dependencies
+# Cache dependencies (avoid recompiling every time)
+RUN cargo init --bin --name populatrs . && \
+    echo "pub fn dummy() {}" > src/lib.rs
+
 COPY backend/Cargo.toml backend/Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && \
-    echo "pub fn dummy() {}" > src/lib.rs && \
-    cargo build --release 2>/dev/null || true && \
+RUN cargo build --release && \
     rm -rf src
 
-# Copy source and built frontend
 COPY backend/src ./src
-COPY --from=frontend-builder /build/dist ../frontend/dist
-
-RUN cargo build --release && \
+RUN touch src/main.rs src/lib.rs && \
+    cargo build --release && \
     strip target/release/populatrs
+
+# ═══════════════════════════════════════════════════════════════
+# Stage 2: Frontend (Node)
+# ═══════════════════════════════════════════════════════════════
+FROM docker.io/library/node:23-alpine AS frontend-builder
+
+RUN npm install -g pnpm@latest
+
+WORKDIR /build
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --ignore-scripts && pnpm rebuild esbuild
+
+COPY frontend/ ./
+RUN CI=true pnpm build
 
 # ═══════════════════════════════════════════════════════════════
 # Stage 3: Runtime
@@ -49,8 +50,9 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 COPY --from=backend-builder /build/target/release/populatrs .
+COPY --from=frontend-builder /build/dist ./dist
 
-RUN chown -R app:app /app
+RUN mkdir -p /app/data && chown -R app:app /app
 
 USER app
 EXPOSE 8080
