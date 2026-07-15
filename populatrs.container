@@ -1,0 +1,16 @@
+[Unit]
+Description=Populatrs RSS Feed Publisher
+
+[Container]
+Image=localhost/populatrs:latest
+EnvironmentFile=/data/rust/populatrs/populatrs.env
+Volume=/data/rust/populatrs/data:/app/data
+PublishPort=8099:8080
+UserNS=keep-id
+HealthCmd=wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=10s
+
+[Install]
+WantedBy=default.target
