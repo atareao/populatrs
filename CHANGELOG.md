@@ -1,4 +1,18 @@
 # Changelog
+## [0.2.0] - 2026-07-15
+
+### Features
+
+- Storage config endpoint, schedule separation, pnpm migration, and dashboard improvements
+
+### Refactor
+
+- Reestructuración completa a modelo Alloy
+## [0.1.5] - 2026-06-23
+
+### Miscellaneous Tasks
+
+- Release v0.1.5
 ## [0.1.4] - 2026-06-23
 
 ### Bug Fixes
@@ -9,6 +23,7 @@
 ### Miscellaneous Tasks
 
 - Release v0.1.4
+- Add crates.io publish job to release workflow
 - Add crates.io publish job to release workflow
 ## [0.1.3] - 2026-06-23
 
