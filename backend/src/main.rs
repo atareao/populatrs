@@ -5,12 +5,12 @@ use populatrs::config::Config;
 use populatrs::db::Database;
 use populatrs::embed::serve_embedded;
 use populatrs::middleware;
-use populatrs::models::{FeedManager, PublisherManager, PublishedPostsStorage};
+use populatrs::models::{FeedManager, PublisherManager};
 use populatrs::routes;
 
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
 async fn main() {
@@ -18,25 +18,29 @@ async fn main() {
 
     let config = Config::load();
 
-    // Initialize tracing
+    // ───── Log broadcast for SSE LogsPage ─────
+    let (log_tx, log_layer) = populatrs::routes::logs::log_layer();
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
+
+    // Initialize tracing: SSE broadcast + env filter + fmt output
     if config.log_format == "json" {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(
-                EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| EnvFilter::new(&config.log_level)),
-            )
+        tracing_subscriber::registry()
+            .with(log_layer)
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().json())
             .init();
     } else {
-        tracing_subscriber::fmt()
-            .pretty()
-            .with_env_filter(
-                EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| EnvFilter::new(&config.log_level)),
+        tracing_subscriber::registry()
+            .with(log_layer)
+            .with(env_filter)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .pretty()
+                    .with_target(true)
+                    .with_file(true)
+                    .with_line_number(true),
             )
-            .with_target(true)
-            .with_file(true)
-            .with_line_number(true)
             .init();
     }
 
@@ -115,6 +119,8 @@ async fn main() {
         oidc_metadata,
         jwt_validator: jwt_validator.clone(),
         oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        log_tx,
     });
 
     // ───── Scheduler ─────
@@ -128,13 +134,15 @@ async fn main() {
     let state_for_middleware = app_state.clone();
     let app = routes::api_routes()
         .layer(CorsLayer::permissive())
-        .layer(axum::middleware::from_fn(move |mut req: axum::extract::Request, next: axum::middleware::Next| {
-            let state = state_for_middleware.clone();
-            async move {
-                req.extensions_mut().insert(state);
-                middleware::require_auth(req, next).await
-            }
-        }))
+        .layer(axum::middleware::from_fn(
+            move |mut req: axum::extract::Request, next: axum::middleware::Next| {
+                let state = state_for_middleware.clone();
+                async move {
+                    req.extensions_mut().insert(state);
+                    middleware::require_auth(req, next).await
+                }
+            },
+        ))
         .fallback(|req: axum::extract::Request| async move {
             let path = req.uri().path().to_string();
             serve_embedded(&path).await
@@ -191,7 +199,11 @@ async fn feed_scheduler_loop(db: Database, config: Config) {
         };
 
         let mut publisher_manager = PublisherManager::new();
-        for (id, pub_config) in &publishers {
+        for (id, (pub_config, enabled)) in &publishers {
+            if !enabled {
+                tracing::debug!("Skipping disabled publisher: {}", id);
+                continue;
+            }
             if let Err(e) = publisher_manager.add_publisher(id.clone(), pub_config) {
                 tracing::error!("Failed to initialize publisher {}: {}", id, e);
             }
@@ -199,20 +211,17 @@ async fn feed_scheduler_loop(db: Database, config: Config) {
         let publisher_manager = Arc::new(publisher_manager);
 
         let mut feed_manager = FeedManager::new();
-        feed_manager.load_feeds_with_cache(feeds.clone(), None, &std::collections::HashMap::new());
+        let youtube_config = db.get_youtube_config().await.unwrap_or(None);
+        feed_manager.load_feeds_with_cache(
+            feeds.clone(),
+            youtube_config,
+            &std::collections::HashMap::new(),
+        );
         let feed_manager = Arc::new(Mutex::new(feed_manager));
-        let published_posts = Arc::new(Mutex::new(PublishedPostsStorage::new()));
 
         let interval = config.default_interval_minutes;
-        if let Err(e) = populatrs::run_feed_check(
-            feed_manager,
-            publisher_manager,
-            published_posts,
-            &db,
-            interval,
-            false,
-        )
-        .await
+        if let Err(e) =
+            populatrs::run_feed_check(feed_manager, publisher_manager, &db, interval, false).await
         {
             tracing::error!("Scheduler feed check error: {}", e);
         }

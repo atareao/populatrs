@@ -79,6 +79,7 @@ export default function FeedList() {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
+      values.publishers ??= [];
       if (editingFeed) {
         await updateFeed(editingFeed.id, { ...editingFeed, ...values });
         message.success("Feed updated");

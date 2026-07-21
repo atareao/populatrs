@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use axum::{
-    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
+    Json,
 };
 use serde_json::json;
 use tracing::instrument;
@@ -133,10 +133,7 @@ pub async fn toggle(
 
 /// Run a feed manually: fetch posts and return them.
 #[instrument(skip(state))]
-pub async fn run(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+pub async fn run(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> impl IntoResponse {
     let feed_config = match state.db.get_feed(&id).await {
         Ok(Some(f)) => f,
         Ok(None) => {

@@ -7,7 +7,6 @@ import Settings from "../pages/Settings";
 
 const mockStorage = {
   data_dir: "/app/data",
-  published_posts_file: "posts.json",
 };
 
 function mockFetch(status: number, body: unknown) {
@@ -60,7 +59,6 @@ describe("Settings", () => {
     });
 
     expect(screen.getByText("/app/data")).toBeInTheDocument();
-    expect(screen.getByText("posts.json")).toBeInTheDocument();
   });
 
   it("renders edit form with loaded values", async () => {
@@ -72,7 +70,7 @@ describe("Settings", () => {
     });
 
     const inputs = screen.getAllByRole("textbox");
-    expect(inputs.length).toBeGreaterThanOrEqual(2);
+    expect(inputs.length).toBeGreaterThanOrEqual(1);
   });
 
   it("saves storage config on form submit", async () => {

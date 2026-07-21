@@ -153,7 +153,9 @@ mod tests {
             description: "Test Description".to_string(),
             url: "https://example.com".to_string(),
         };
-        let result = renderer.render("{{ title }}: {{ description }}", &context).unwrap();
+        let result = renderer
+            .render("{{ title }}: {{ description }}", &context)
+            .unwrap();
         assert_eq!(result, "Test Title: Test Description");
     }
 
@@ -173,8 +175,12 @@ mod tests {
     #[test]
     fn test_render_from_post() {
         let post = Post::new(
-            "g1".into(), "Test Post".into(), Some("A description".into()),
-            "https://ex.com".into(), chrono::Utc::now(), "feed-1".into(),
+            "g1".into(),
+            "Test Post".into(),
+            Some("A description".into()),
+            "https://ex.com".into(),
+            chrono::Utc::now(),
+            "feed-1".into(),
         );
         let context = TemplateContext::from(&post);
         assert_eq!(context.title, "Test Post");

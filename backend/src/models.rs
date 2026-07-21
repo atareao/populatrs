@@ -30,7 +30,6 @@ pub struct ScheduleConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub data_dir: String,
-    pub published_posts_file: String,
 }
 
 impl Default for AppConfig {
@@ -45,7 +44,6 @@ impl Default for AppConfig {
             },
             storage: StorageConfig {
                 data_dir: "./data".to_string(),
-                published_posts_file: "published_posts.json".to_string(),
             },
         }
     }
@@ -61,6 +59,7 @@ pub struct FeedConfig {
     pub feed_type: String,
     pub config: FeedTypeConfig,
     pub enabled: bool,
+    #[serde(default)]
     pub publishers: Vec<String>,
     pub check_interval_minutes: Option<u64>,
     pub max_retries: Option<u32>,
@@ -301,6 +300,7 @@ impl Feed {
 pub struct FeedManager {
     feeds: Vec<FeedConfig>,
     cache: HashMap<String, FeedCacheMetadata>,
+    youtube_config: Option<YouTubeGlobalConfig>,
 }
 
 impl FeedManager {
@@ -308,16 +308,18 @@ impl FeedManager {
         Self {
             feeds: vec![],
             cache: HashMap::new(),
+            youtube_config: None,
         }
     }
 
     pub fn load_feeds_with_cache(
         &mut self,
         feeds: Vec<FeedConfig>,
-        _youtube_config: Option<YouTubeGlobalConfig>,
+        youtube_config: Option<YouTubeGlobalConfig>,
         cache: &HashMap<String, FeedCacheMetadata>,
     ) {
         self.feeds = feeds;
+        self.youtube_config = youtube_config;
         self.cache = cache.clone();
     }
 
@@ -338,7 +340,7 @@ impl FeedManager {
             if !feed_config.enabled {
                 continue;
             }
-            let feed = Feed::new(feed_config.clone(), None);
+            let feed = Feed::new(feed_config.clone(), self.youtube_config.clone());
             let result = feed.fetch_posts().await;
             results.push((feed_config.id.clone(), result));
         }
@@ -412,7 +414,10 @@ mod tests {
         );
 
         assert!(!storage.is_published(&post));
-        storage.mark_published(&post, vec![("telegram".to_string(), true, "OK".to_string())]);
+        storage.mark_published(
+            &post,
+            vec![("telegram".to_string(), true, "OK".to_string())],
+        );
         assert!(storage.is_published(&post));
         assert_eq!(storage.posts.len(), 1);
     }

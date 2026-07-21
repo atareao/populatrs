@@ -1,18 +1,10 @@
-use axum::{
-    extract::Request,
-    http::StatusCode,
-    middleware::Next,
-    response::Response,
-};
 use crate::auth::{AppState, AuthUser};
+use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 use std::sync::Arc;
 
 /// Dev mode auth: accepts any token, uses default dev user.
 /// Production mode: validates Bearer token via OIDC/JWKS.
-pub async fn require_auth(
-    mut req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+pub async fn require_auth(mut req: Request, next: Next) -> Result<Response, StatusCode> {
     // Check if we're in dev mode — access state from the request
     // Since we can't extract State directly in `from_fn`, we use an extension
     let is_dev = req

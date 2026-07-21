@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Mutex;
 
 use crate::models::{
-    FeedConfig, FeedTypeConfig, PublisherConfig, ScheduleConfig,
+    FeedConfig, FeedTypeConfig, PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
 };
 
 /// Database handle wrapping a SQLite connection.
@@ -21,7 +21,9 @@ impl Database {
     /// Open (or create) the SQLite database at `path` and run migrations.
     pub async fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await.context("Failed to create data directory")?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("Failed to create data directory")?;
         }
 
         let conn = Connection::open(path).context("Failed to open SQLite database")?;
@@ -132,10 +134,8 @@ impl Database {
                 let max_retries: Option<i32> = row.get(6)?;
                 let retry_delay: Option<i64> = row.get(7)?;
 
-                let config: FeedTypeConfig =
-                    serde_json::from_str(&config_json).unwrap_or(FeedTypeConfig::Rss {
-                        url: String::new(),
-                    });
+                let config: FeedTypeConfig = serde_json::from_str(&config_json)
+                    .unwrap_or(FeedTypeConfig::Rss { url: String::new() });
 
                 Ok(FeedConfig {
                     id,
@@ -189,10 +189,8 @@ impl Database {
                 let max_retries: Option<i32> = row.get(6)?;
                 let retry_delay: Option<i64> = row.get(7)?;
 
-                let config: FeedTypeConfig =
-                    serde_json::from_str(&config_json).unwrap_or(FeedTypeConfig::Rss {
-                        url: String::new(),
-                    });
+                let config: FeedTypeConfig = serde_json::from_str(&config_json)
+                    .unwrap_or(FeedTypeConfig::Rss { url: String::new() });
 
                 Ok(FeedConfig {
                     id,
@@ -210,8 +208,8 @@ impl Database {
             .context("Failed to query feed")?;
 
         if let Some(mut feed) = feed {
-            let mut pstmt = conn
-                .prepare("SELECT publisher_id FROM feed_publishers WHERE feed_id = ?1")?;
+            let mut pstmt =
+                conn.prepare("SELECT publisher_id FROM feed_publishers WHERE feed_id = ?1")?;
             let pub_ids: Vec<String> = pstmt
                 .query_map(params![id], |row| row.get(0))?
                 .filter_map(|r| r.ok())
@@ -226,7 +224,8 @@ impl Database {
     /// Create a new feed.
     pub async fn create_feed(&self, feed: &FeedConfig) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        let config_json = serde_json::to_string(&feed.config).context("Failed to serialize feed config")?;
+        let config_json =
+            serde_json::to_string(&feed.config).context("Failed to serialize feed config")?;
 
         let conn = self.conn.lock().await;
         conn.execute(
@@ -261,7 +260,8 @@ impl Database {
     /// Update an existing feed.
     pub async fn update_feed(&self, id: &str, feed: &FeedConfig) -> Result<bool> {
         let now = Utc::now().to_rfc3339();
-        let config_json = serde_json::to_string(&feed.config).context("Failed to serialize feed config")?;
+        let config_json =
+            serde_json::to_string(&feed.config).context("Failed to serialize feed config")?;
 
         let conn = self.conn.lock().await;
         let rows = conn
@@ -325,9 +325,11 @@ impl Database {
             return Ok(None);
         }
         let enabled: bool = conn
-            .query_row("SELECT enabled FROM feeds WHERE id = ?1", params![id], |row| {
-                row.get::<_, i32>(0).map(|v| v != 0)
-            })
+            .query_row(
+                "SELECT enabled FROM feeds WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, i32>(0).map(|v| v != 0),
+            )
             .optional()
             .context("Failed to read feed after toggle")?
             .unwrap_or(false);
@@ -337,92 +339,26 @@ impl Database {
     // ───── Publishers ─────
 
     /// List all publishers.
-    pub async fn list_publishers(&self) -> Result<HashMap<String, PublisherConfig>> {
+    pub async fn list_publishers(&self) -> Result<HashMap<String, (PublisherConfig, bool)>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn
-            .prepare(
-                "SELECT id, publisher_type, config_json, enabled FROM publishers ORDER BY name",
-            )
+            .prepare("SELECT id, config_json, enabled FROM publishers ORDER BY name")
             .context("Failed to prepare list_publishers")?;
 
         let publishers = stmt
             .query_map([], |row| {
                 let id: String = row.get(0)?;
-                let ptype: String = row.get(1)?;
-                let config_json: String = row.get(2)?;
-                let _enabled: bool = row.get::<_, i32>(3)? != 0;
-                Ok((id, ptype, config_json))
+                let config_json: String = row.get(1)?;
+                let enabled: bool = row.get::<_, i32>(2)? != 0;
+                Ok((id, config_json, enabled))
             })
             .context("Failed to query publishers")?;
 
         let mut result = HashMap::new();
         for entry in publishers {
-            let (id, ptype, config_json) = entry?;
-            // Deserialize based on type tag
-            let tagged = serde_json::from_str::<serde_json::Value>(&config_json).ok();
-            let config = match ptype.as_str() {
-                "telegram" => Some(PublisherConfig::Telegram {
-                    bot_token: tagged.as_ref().and_then(|v| v.get("bot_token")?.as_str().map(String::from)).unwrap_or_default(),
-                    chat_id: tagged.as_ref().and_then(|v| v.get("chat_id")?.as_str().map(String::from)).unwrap_or_default(),
-                    parse_mode: tagged.as_ref().and_then(|v| v.get("parse_mode")?.as_str().map(String::from)),
-                    message_thread_id: tagged.as_ref().and_then(|v| v.get("message_thread_id")?.as_str().map(String::from)),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "x" => Some(PublisherConfig::X {
-                    client_id: tagged.as_ref().and_then(|v| v.get("client_id")?.as_str().map(String::from)).unwrap_or_default(),
-                    client_secret: tagged.as_ref().and_then(|v| v.get("client_secret")?.as_str().map(String::from)).unwrap_or_default(),
-                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)),
-                    refresh_token: tagged.as_ref().and_then(|v| v.get("refresh_token")?.as_str().map(String::from)),
-                    redirect_uri: tagged.as_ref().and_then(|v| v.get("redirect_uri")?.as_str().map(String::from)),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "mastodon" => Some(PublisherConfig::Mastodon {
-                    server_url: tagged.as_ref().and_then(|v| v.get("server_url")?.as_str().map(String::from)).unwrap_or_default(),
-                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "linkedin" => Some(PublisherConfig::LinkedIn {
-                    client_id: tagged.as_ref().and_then(|v| v.get("client_id")?.as_str().map(String::from)).unwrap_or_default(),
-                    client_secret: tagged.as_ref().and_then(|v| v.get("client_secret")?.as_str().map(String::from)).unwrap_or_default(),
-                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)),
-                    refresh_token: tagged.as_ref().and_then(|v| v.get("refresh_token")?.as_str().map(String::from)),
-                    user_id: tagged.as_ref().and_then(|v| v.get("user_id")?.as_str().map(String::from)),
-                    redirect_uri: tagged.as_ref().and_then(|v| v.get("redirect_uri")?.as_str().map(String::from)),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "openobserve" => Some(PublisherConfig::OpenObserve {
-                    url: tagged.as_ref().and_then(|v| v.get("url")?.as_str().map(String::from)).unwrap_or_default(),
-                    organization: tagged.as_ref().and_then(|v| v.get("organization")?.as_str().map(String::from)).unwrap_or_default(),
-                    stream_name: tagged.as_ref().and_then(|v| v.get("stream_name")?.as_str().map(String::from)).unwrap_or_default(),
-                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "matrix" => Some(PublisherConfig::Matrix {
-                    homeserver_url: tagged.as_ref().and_then(|v| v.get("homeserver_url")?.as_str().map(String::from)).unwrap_or_default(),
-                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
-                    room_id: tagged.as_ref().and_then(|v| v.get("room_id")?.as_str().map(String::from)).unwrap_or_default(),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "bluesky" => Some(PublisherConfig::Bluesky {
-                    handle: tagged.as_ref().and_then(|v| v.get("handle")?.as_str().map(String::from)).unwrap_or_default(),
-                    password: tagged.as_ref().and_then(|v| v.get("password")?.as_str().map(String::from)).unwrap_or_default(),
-                    pds_url: tagged.as_ref().and_then(|v| v.get("pds_url")?.as_str().map(String::from)),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "threads" => Some(PublisherConfig::Threads {
-                    access_token: tagged.as_ref().and_then(|v| v.get("access_token")?.as_str().map(String::from)).unwrap_or_default(),
-                    user_id: tagged.as_ref().and_then(|v| v.get("user_id")?.as_str().map(String::from)).unwrap_or_default(),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                "discord" => Some(PublisherConfig::Discord {
-                    webhook_url: tagged.as_ref().and_then(|v| v.get("webhook_url")?.as_str().map(String::from)).unwrap_or_default(),
-                    template: tagged.as_ref().and_then(|v| v.get("template")?.as_str().map(String::from)),
-                }),
-                _ => None,
-            };
-
-            if let Some(config) = config {
-                result.insert(id, config);
+            let (id, config_json, enabled) = entry?;
+            if let Ok(config) = serde_json::from_str::<PublisherConfig>(&config_json) {
+                result.insert(id, (config, enabled));
             }
         }
         Ok(result)
@@ -431,27 +367,57 @@ impl Database {
     /// Get a single publisher config by ID.
     pub async fn get_publisher(&self, id: &str) -> Result<Option<PublisherConfig>> {
         let publishers = self.list_publishers().await?;
-        Ok(publishers.into_iter().find(|(k, _)| k == id).map(|(_, v)| v))
+        Ok(publishers
+            .into_iter()
+            .find(|(k, _)| k == id)
+            .map(|(_, (v, _))| v))
+    }
+
+    /// Get the enabled status of a publisher.
+    pub async fn get_publisher_enabled(&self, id: &str) -> Result<Option<bool>> {
+        let publishers = self.list_publishers().await?;
+        Ok(publishers
+            .into_iter()
+            .find(|(k, _)| k == id)
+            .map(|(_, (_, enabled))| enabled))
     }
 
     /// Create or update a publisher.
-    pub async fn upsert_publisher(&self, id: &str, config: &PublisherConfig) -> Result<()> {
+    pub async fn upsert_publisher(
+        &self,
+        id: &str,
+        config: &PublisherConfig,
+        enabled: bool,
+    ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let ptype = config.type_name().to_lowercase();
-        let config_json = serde_json::to_string(config).context("Failed to serialize publisher config")?;
+        let config_json =
+            serde_json::to_string(config).context("Failed to serialize publisher config")?;
         let name = id.to_string();
 
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO publishers (id, name, publisher_type, config_json, enabled, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
              ON CONFLICT(id) DO UPDATE SET \
              name = excluded.name, publisher_type = excluded.publisher_type, \
-             config_json = excluded.config_json, updated_at = excluded.updated_at",
-            params![id, name, ptype, config_json, now, now],
+             config_json = excluded.config_json, enabled = excluded.enabled, updated_at = excluded.updated_at",
+            params![id, name, ptype, config_json, enabled as i32, now, now],
         )
         .context("Failed to upsert publisher")?;
         Ok(())
+    }
+
+    /// Set the enabled status of a publisher.
+    pub async fn set_publisher_enabled(&self, id: &str, enabled: bool) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let rows = conn
+            .execute(
+                "UPDATE publishers SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
+                params![enabled as i32, Utc::now().to_rfc3339(), id],
+            )
+            .context("Failed to set publisher enabled")?;
+        Ok(rows > 0)
     }
 
     /// Delete a publisher by ID.
@@ -536,14 +502,21 @@ impl Database {
     // ───── Feed Cache ─────
 
     /// Get cached ETag for a feed.
-    pub async fn get_feed_cache(&self, feed_id: &str) -> Result<Option<(Option<String>, Option<String>, Option<String>)>> {
+    pub async fn get_feed_cache(
+        &self,
+        feed_id: &str,
+    ) -> Result<Option<(Option<String>, Option<String>, Option<String>)>> {
         let conn = self.conn.lock().await;
         let result = conn
             .query_row(
                 "SELECT etag, last_modified, last_content_hash FROM feed_cache WHERE feed_id = ?1",
                 params![feed_id],
                 |row| {
-                    Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?))
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
                 },
             )
             .optional()
@@ -619,10 +592,47 @@ impl Database {
 
     /// Update schedule configuration.
     pub async fn set_schedule(&self, schedule: &ScheduleConfig) -> Result<()> {
-        self.set_setting("schedule_interval", &schedule.default_interval_minutes.to_string())
-            .await?;
+        self.set_setting(
+            "schedule_interval",
+            &schedule.default_interval_minutes.to_string(),
+        )
+        .await?;
         self.set_setting("schedule_timezone", &schedule.timezone)
             .await?;
+        Ok(())
+    }
+
+    // ───── YouTube Config ─────
+
+    /// Load YouTube global configuration from settings table.
+    pub async fn get_youtube_config(&self) -> Result<Option<YouTubeGlobalConfig>> {
+        let api_key = self.get_setting("youtube_api_key").await?;
+        match api_key {
+            Some(key) => {
+                let default_max_results = self
+                    .get_setting("youtube_default_max_results")
+                    .await?
+                    .and_then(|v| v.parse::<u64>().ok());
+                Ok(Some(YouTubeGlobalConfig {
+                    api_key: key,
+                    default_max_results,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Set YouTube global configuration in settings table.
+    pub async fn set_youtube_config(&self, config: &YouTubeGlobalConfig) -> Result<()> {
+        self.set_setting("youtube_api_key", &config.api_key).await?;
+        self.set_setting(
+            "youtube_default_max_results",
+            &config
+                .default_max_results
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -631,24 +641,50 @@ impl Database {
     /// Get dashboard stats.
     pub async fn get_stats(&self) -> Result<Stats> {
         let conn = self.conn.lock().await;
-        let total_feeds: i64 = conn
-            .query_row("SELECT COUNT(*) FROM feeds", [], |row| row.get(0))?;
-        let enabled_feeds: i64 = conn
-            .query_row("SELECT COUNT(*) FROM feeds WHERE enabled = 1", [], |row| {
+
+        let total_feeds: i64 =
+            conn.query_row("SELECT COUNT(*) FROM feeds", [], |row| row.get(0))?;
+        let enabled_feeds: i64 =
+            conn.query_row("SELECT COUNT(*) FROM feeds WHERE enabled = 1", [], |row| {
                 row.get(0)
             })?;
-        let total_publishers: i64 = conn
-            .query_row("SELECT COUNT(*) FROM publishers", [], |row| row.get(0))?;
-        let total_published: i64 = conn
-            .query_row("SELECT COUNT(*) FROM published_posts", [], |row| row.get(0))?;
-        let schedule = self.get_schedule().await?;
+        let total_publishers: i64 =
+            conn.query_row("SELECT COUNT(*) FROM publishers", [], |row| row.get(0))?;
+        let total_published: i64 =
+            conn.query_row("SELECT COUNT(*) FROM published_posts", [], |row| row.get(0))?;
+
+        // ⚠️ Inline schedule queries while holding the lock to avoid deadlock.
+        //    Do NOT call self.get_schedule() here — it would try to re-acquire
+        //    the same tokio::sync::Mutex, which is not reentrant.
+        let interval: i64 = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'schedule_interval'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("Failed to query schedule_interval")?
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(60);
+        let timezone: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'schedule_timezone'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("Failed to query schedule_timezone")?
+            .unwrap_or_else(|| "UTC".to_string());
 
         Ok(Stats {
             total_feeds: total_feeds as u64,
             enabled_feeds: enabled_feeds as u64,
             total_publishers: total_publishers as u64,
             total_published: total_published as u64,
-            schedule,
+            schedule: ScheduleConfig {
+                default_interval_minutes: interval as u64,
+                timezone,
+            },
         })
     }
 }
@@ -681,7 +717,9 @@ mod tests {
             id: "test-feed".into(),
             name: "Test Feed".into(),
             feed_type: "rss".into(),
-            config: FeedTypeConfig::Rss { url: "https://example.com/feed.xml".into() },
+            config: FeedTypeConfig::Rss {
+                url: "https://example.com/feed.xml".into(),
+            },
             enabled: true,
             publishers: vec![],
             check_interval_minutes: Some(30),
@@ -709,7 +747,9 @@ mod tests {
             id: "feed-1".into(),
             name: "Original".into(),
             feed_type: "rss".into(),
-            config: FeedTypeConfig::Rss { url: "https://ex.com/feed.xml".into() },
+            config: FeedTypeConfig::Rss {
+                url: "https://ex.com/feed.xml".into(),
+            },
             enabled: true,
             publishers: vec![],
             check_interval_minutes: None,
@@ -734,7 +774,9 @@ mod tests {
             id: "to-delete".into(),
             name: "Delete Me".into(),
             feed_type: "rss".into(),
-            config: FeedTypeConfig::Rss { url: "https://ex.com/feed.xml".into() },
+            config: FeedTypeConfig::Rss {
+                url: "https://ex.com/feed.xml".into(),
+            },
             enabled: true,
             publishers: vec![],
             check_interval_minutes: None,
@@ -753,7 +795,9 @@ mod tests {
             id: "toggle-me".into(),
             name: "Toggle".into(),
             feed_type: "rss".into(),
-            config: FeedTypeConfig::Rss { url: "https://ex.com/feed.xml".into() },
+            config: FeedTypeConfig::Rss {
+                url: "https://ex.com/feed.xml".into(),
+            },
             enabled: true,
             publishers: vec![],
             check_interval_minutes: None,
@@ -777,7 +821,9 @@ mod tests {
             message_thread_id: None,
             template: None,
         };
-        db.upsert_publisher("telegram-1", &config).await.unwrap();
+        db.upsert_publisher("telegram-1", &config, true)
+            .await
+            .unwrap();
         let publishers = db.list_publishers().await.unwrap();
         assert_eq!(publishers.len(), 1);
         assert!(publishers.contains_key("telegram-1"));

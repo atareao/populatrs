@@ -134,7 +134,7 @@ describe("api/http", () => {
   describe("fetchPublishers", () => {
     it("returns publishers", async () => {
       setToken("t");
-      mockFetch(200, { publishers: { telegram: { type: "Telegram" } }, total: 1 });
+      mockFetch(200, { publishers: { telegram: { type: "Telegram", config: {}, enabled: true } }, total: 1 });
 
       const data = await fetchPublishers();
       expect(data.total).toBe(1);
@@ -147,7 +147,7 @@ describe("api/http", () => {
       setToken("t");
       mockFetch(204, null);
 
-      await updatePublisher("telegram", { type: "Telegram", config: { bot_token: "abc" } });
+      await updatePublisher("telegram", { type: "Telegram", config: { bot_token: "abc" }, enabled: true });
 
       expect(fetch).toHaveBeenCalledWith("/api/publishers/telegram", expect.objectContaining({
         method: "PUT",
@@ -182,7 +182,7 @@ describe("api/http", () => {
   describe("fetchStorage", () => {
     it("returns storage config", async () => {
       setToken("t");
-      mockFetch(200, { data_dir: "/data", published_posts_file: "posts.json" });
+      mockFetch(200, { data_dir: "/data" });
 
       const storage = await fetchStorage();
       expect(storage.data_dir).toBe("/data");
@@ -194,7 +194,7 @@ describe("api/http", () => {
       setToken("t");
       mockFetch(204, null);
 
-      await updateStorage({ data_dir: "/data", published_posts_file: "posts.json" });
+      await updateStorage({ data_dir: "/data" });
 
       expect(fetch).toHaveBeenCalledWith("/api/storage", expect.objectContaining({
         method: "PUT",
@@ -209,7 +209,7 @@ describe("api/http", () => {
         feeds: { total: 5, enabled: 3, disabled: 2 },
         publishers: { total: 2 },
         schedule: { interval_minutes: 60, timezone: "UTC" },
-        storage: { data_dir: "./data", published_posts_file: "posts.json" },
+        storage: { data_dir: "./data" },
       });
 
       const status = await fetchStatus();

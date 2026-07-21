@@ -5,8 +5,8 @@ Description=Populatrs RSS Feed Publisher
 Image=docker.io/atareao/populatrs:latest
 EnvironmentFile=%h/populatrs/populatrs.env
 Volume=%h/populatrs/data:/app/data:Z
-PublishPort=8080:8080
-HealthCmd=wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+PublishPort=3044:3044
+HealthCmd=wget --no-verbose --tries=1 --spider http://localhost:3044/health || exit 1
 HealthInterval=30s
 HealthRetries=3
 HealthStartPeriod=10s

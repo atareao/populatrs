@@ -5,6 +5,7 @@ import AppLayout from "./components/AppLayout";
 import { Spin } from "antd";
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
+const LogsPage = lazy(() => import("./pages/LogsPage"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const FeedList = lazy(() => import("./pages/Feeds/FeedList"));
 const PublisherList = lazy(() => import("./pages/Publishers/PublisherList"));
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="publishers" element={<SuspenseWrapper><PublisherList /></SuspenseWrapper>} />
         <Route path="schedule" element={<SuspenseWrapper><Schedule /></SuspenseWrapper>} />
         <Route path="settings" element={<SuspenseWrapper><Settings /></SuspenseWrapper>} />
+        <Route path="logs" element={<SuspenseWrapper><LogsPage /></SuspenseWrapper>} />
       </Route>
     </Routes>
   );

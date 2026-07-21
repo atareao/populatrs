@@ -77,7 +77,7 @@ populatrs/
 cd backend
 
 # Modo desarrollo (sin OIDC — auth bypass automático)
-HOST=0.0.0.0 PORT=8080 RUST_LOG=info cargo run
+HOST=0.0.0.0 PORT=3044 RUST_LOG=info cargo run
 
 # Producción (con OIDC)
 OIDC_ISSUER_URL=https://pocketid.example.com \
@@ -96,7 +96,7 @@ cargo fmt -- --check
 ```bash
 cd frontend
 pnpm install
-pnpm dev          # Puerto 5173, proxy a backend en :8080
+pnpm dev          # Puerto 5173, proxy a backend en :3044
 pnpm build        # Build producción → dist/
 pnpm test         # Tests con Vitest
 ```
@@ -115,7 +115,7 @@ just version  # Bump patch + tag
 | Variable | Descripción | Default |
 |---|---|---|
 | `HOST` | IP de escucha | `0.0.0.0` |
-| `PORT` | Puerto | `8080` |
+| `PORT` | Puerto | `3044` |
 | `DATABASE_URL` | Ruta a SQLite | `./data/populatrs.db` |
 | `DATA_DIR` | Directorio de datos | `./data` |
 | `CHECK_INTERVAL` | Minutos entre check de feeds | `60` |
@@ -125,7 +125,7 @@ just version  # Bump patch + tag
 | `OIDC_ISSUER_URL` | URL del issuer OIDC | — |
 | `OIDC_CLIENT_ID` | Client ID OIDC | — |
 | `OIDC_CLIENT_SECRET` | Client secret OIDC | — |
-| `OIDC_REDIRECT_URI` | Callback URL | `http://localhost:8080/auth/callback` |
+| `OIDC_REDIRECT_URI` | Callback URL | `http://localhost:3044/auth/callback` |
 
 ## Modos de auth
 
@@ -166,7 +166,7 @@ el intervalo configurado.
 
 ```bash
 docker build -t populatrs:latest .
-docker run -p 8080:8080 \
+docker run -p 3044:3044 \
   -v $(pwd)/data:/app/data \
   -e DATABASE_URL=/app/data/populatrs.db \
   populatrs:latest
