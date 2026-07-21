@@ -88,9 +88,6 @@ export default function Dashboard() {
               <Descriptions.Item label="Data Directory">
                 <code>{status.storage.data_dir}</code>
               </Descriptions.Item>
-              <Descriptions.Item label="Published Posts File">
-                <code>{status.storage.published_posts_file}</code>
-              </Descriptions.Item>
             </Descriptions>
           </Card>
         </Col>

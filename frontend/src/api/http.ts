@@ -19,6 +19,7 @@ export interface FeedConfig {
 export interface PublisherConfigEntry {
   type: string;
   config: Record<string, unknown>;
+  enabled: boolean;
 }
 
 export interface ScheduleConfig {
@@ -28,7 +29,6 @@ export interface ScheduleConfig {
 
 export interface StorageConfig {
   data_dir: string;
-  published_posts_file: string;
 }
 
 export interface DashboardStatus {
@@ -36,7 +36,7 @@ export interface DashboardStatus {
   publishers: { total: number };
   published_posts: number;
   schedule: { interval_minutes: number; timezone: string };
-  storage: { data_dir: string; published_posts_file: string };
+  storage: { data_dir: string };
 }
 
 import { getToken } from "../store/auth";
@@ -92,8 +92,24 @@ export async function fetchPublishers(): Promise<{ publishers: Record<string, Pu
   return fetcher("/api/publishers");
 }
 
+export async function createPublisher(id: string, config: PublisherConfigEntry): Promise<void> {
+  return fetcher("/api/publishers", { method: "POST", body: { id, config } });
+}
+
 export async function updatePublisher(id: string, config: PublisherConfigEntry): Promise<void> {
   return fetcher(`/api/publishers/${id}`, { method: "PUT", body: { config } });
+}
+
+export async function testPublisher(id: string): Promise<{ status: string; message: string }> {
+  return fetcher(`/api/publishers/${id}/test`, { method: "POST" });
+}
+
+export async function deletePublisher(id: string): Promise<void> {
+  return fetcher(`/api/publishers/${id}`, { method: "DELETE" });
+}
+
+export async function togglePublisher(id: string): Promise<{ enabled: boolean }> {
+  return fetcher(`/api/publishers/${id}`, { method: "PATCH" });
 }
 
 // Schedule

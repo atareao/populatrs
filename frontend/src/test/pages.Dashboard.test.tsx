@@ -9,7 +9,7 @@ const mockStatus = {
   publishers: { total: 4 },
   published_posts: 128,
   schedule: { interval_minutes: 60, timezone: "Europe/Madrid" },
-  storage: { data_dir: "./data", published_posts_file: "published_posts.json" },
+  storage: { data_dir: "./data" },
 };
 
 function mockFetch(status: number, body: unknown) {
@@ -98,7 +98,6 @@ describe("Dashboard", () => {
     });
 
     expect(screen.getByText("./data")).toBeInTheDocument();
-    expect(screen.getByText("published_posts.json")).toBeInTheDocument();
   });
 
   it("shows error when API fails", async () => {
@@ -116,7 +115,7 @@ describe("Dashboard", () => {
       publishers: { total: 0 },
       published_posts: 0,
       schedule: { interval_minutes: 60, timezone: "UTC" },
-      storage: { data_dir: "./data", published_posts_file: "published_posts.json" },
+      storage: { data_dir: "./data" },
     });
     renderDashboard();
 

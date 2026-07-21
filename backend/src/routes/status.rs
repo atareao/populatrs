@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Json, extract::State};
+use axum::{extract::State, Json};
 use serde_json::json;
 
 use crate::auth::AppState;
@@ -12,7 +12,6 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Json<serde_json::V
         Ok(stats) => {
             let storage = StorageConfig {
                 data_dir: state.config.data_dir.to_string_lossy().to_string(),
-                published_posts_file: "published_posts.json".to_string(),
             };
             Json(json!({
                 "feeds": {
@@ -37,7 +36,7 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Json<serde_json::V
             "publishers": { "total": 0 },
             "published_posts": 0,
             "schedule": { "interval_minutes": 60, "timezone": "UTC" },
-            "storage": { "data_dir": "./data", "published_posts_file": "published_posts.json" }
+            "storage": { "data_dir": "./data" }
         })),
     }
 }

@@ -7,9 +7,9 @@ import PublisherList from "../pages/Publishers/PublisherList";
 
 const mockPublishersData = {
   publishers: {
-    telegram: { type: "Telegram", config: { bot_token: "xxx", chat_id: "-123" } },
-    x: { type: "X", config: { client_id: "cid", client_secret: "csec", redirect_uri: "http://localhost:5173/oauth/callback" } },
-    mastodon: { type: "Mastodon", config: { server_url: "https://mastodon.social", access_token: "" } },
+    telegram: { type: "Telegram", config: { bot_token: "xxx", chat_id: "-123" }, enabled: true },
+    x: { type: "X", config: { client_id: "cid", client_secret: "csec", redirect_uri: "http://localhost:5173/oauth/callback" }, enabled: true },
+    mastodon: { type: "Mastodon", config: { server_url: "https://mastodon.social", access_token: "" }, enabled: false },
   },
   total: 3,
 };
@@ -90,34 +90,38 @@ describe("PublisherList", () => {
     expect(screen.getByText("Mastodon")).toBeInTheDocument();
   });
 
-  it("shows Configured status for publishers with tokens", async () => {
+  it("shows enabled toggle for publishers", async () => {
     mockMultiFetch({
       "/api/publishers": { status: 200, body: mockPublishersData },
     });
     renderPublisherList();
 
     await waitFor(() => {
-      const configured = screen.getAllByText("Configured");
-      expect(configured.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("telegram")).toBeInTheDocument();
     });
+
+    // All switches should be rendered
+    const switches = screen.getAllByRole("switch");
+    expect(switches.length).toBe(3);
   });
 
-  it("shows Pending status for publishers without tokens", async () => {
+  it("shows enabled publisher with switch checked", async () => {
     mockMultiFetch({
       "/api/publishers": { status: 200, body: mockPublishersData },
     });
     renderPublisherList();
 
     await waitFor(() => {
-      const pending = screen.getAllByText("Pending");
-      expect(pending.length).toBeGreaterThanOrEqual(1);
+      const switches = screen.getAllByRole("switch");
+      // telegram is enabled
+      expect(switches[0]).toBeChecked();
     });
   });
 
   it("shows Connect button for OAuth publishers without tokens", async () => {
     const noTokenPublishers = {
       publishers: {
-        x: { type: "X", config: { client_id: "cid", client_secret: "csec", access_token: null, redirect_uri: "http://localhost:5173/oauth/callback" } },
+        x: { type: "X", config: { client_id: "cid", client_secret: "csec", access_token: null, redirect_uri: "http://localhost:5173/oauth/callback" }, enabled: true },
       },
       total: 1,
     };

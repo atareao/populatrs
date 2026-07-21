@@ -67,7 +67,10 @@ async fn fetch_rss_with_retry(client: &Client, url: &str) -> Result<Vec<Post>> {
         anyhow::bail!("HTTP {}", response.status());
     }
 
-    let content = response.text().await.context("Failed to read response body")?;
+    let content = response
+        .text()
+        .await
+        .context("Failed to read response body")?;
 
     // Try RSS first
     if let Ok(channel) = content.parse::<rss::Channel>() {
@@ -106,7 +109,14 @@ fn parse_rss_channel(channel: rss::Channel) -> Vec<Post> {
                 .map(|d| d.with_timezone(&Utc))
                 .unwrap_or_else(Utc::now);
 
-            Some(Post::new(guid, title, description, url, pub_date, String::new()))
+            Some(Post::new(
+                guid,
+                title,
+                description,
+                url,
+                pub_date,
+                String::new(),
+            ))
         })
         .collect()
 }
@@ -119,7 +129,10 @@ fn parse_feed_rs(feed: feed_rs::model::Feed) -> Vec<Post> {
             if guid.is_empty() {
                 return None;
             }
-            let title = entry.title.map(|t| t.content).unwrap_or_else(|| "Untitled".to_string());
+            let title = entry
+                .title
+                .map(|t| t.content)
+                .unwrap_or_else(|| "Untitled".to_string());
             let description = entry.summary.map(|s| s.content);
             let url = entry
                 .links
@@ -133,7 +146,14 @@ fn parse_feed_rs(feed: feed_rs::model::Feed) -> Vec<Post> {
                 .map(|d| d.with_timezone(&Utc))
                 .unwrap_or_else(Utc::now);
 
-            Some(Post::new(guid, title, description, url, pub_date, String::new()))
+            Some(Post::new(
+                guid,
+                title,
+                description,
+                url,
+                pub_date,
+                String::new(),
+            ))
         })
         .collect()
 }
@@ -143,8 +163,8 @@ pub async fn fetch_youtube_posts(
     config: &FeedConfig,
     youtube_config: Option<&YouTubeGlobalConfig>,
 ) -> Result<Vec<Post>> {
-    let youtube_global = youtube_config
-        .ok_or_else(|| anyhow::anyhow!("YouTube global configuration not found"))?;
+    let youtube_global =
+        youtube_config.ok_or_else(|| anyhow::anyhow!("YouTube global configuration not found"))?;
 
     let (channel_id, playlist_id, username, max_results) = match &config.config {
         FeedTypeConfig::Youtube {
@@ -271,14 +291,16 @@ fn parse_youtube_response(resp: serde_json::Value) -> Result<Vec<Post>> {
             let snippet = &item["snippet"];
             let resource = &item["snippet"];
 
-            let video_id = item.get("id")
+            let video_id = item
+                .get("id")
                 .and_then(|id| {
                     id.get("videoId")
                         .and_then(|v| v.as_str().map(String::from))
                         .or_else(|| id.as_str().map(String::from))
                 })
                 .or_else(|| {
-                    resource.get("resourceId")
+                    resource
+                        .get("resourceId")
                         .and_then(|r| r.get("videoId")?.as_str().map(String::from))
                 })?;
 

@@ -548,7 +548,7 @@ Before running OAuth setup, ensure your `config.json` has the client credentials
       "config": {
         "client_id": "78se6i61p0gmlo",
         "client_secret": "YOUR_CLIENT_SECRET",
-        "redirect_uri": "http://localhost:8080/callback",
+        "redirect_uri": "http://localhost:3044/callback",
         "access_token": null,
         "refresh_token": null,
         "user_id": null

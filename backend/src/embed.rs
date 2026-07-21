@@ -1,12 +1,33 @@
+use std::path::PathBuf;
+
 use axum::{
     body::Body,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 
-/// Serve static files from the `./dist` directory (not embedded).
+/// Possible locations for the `dist` directory (frontend build output).
+/// Checked in order — first match wins.
+fn dist_dir() -> PathBuf {
+    let candidates = [
+        "dist",             // Docker / project root
+        "frontend/dist",    // Running from project root
+        "../frontend/dist", // Running from backend/
+    ];
+    for candidate in &candidates {
+        let path = PathBuf::from(candidate);
+        if path.join("index.html").exists() {
+            return path;
+        }
+    }
+    // Fallback: use the default location
+    PathBuf::from("dist")
+}
+
+/// Serve static files from the frontend build directory.
 /// Falls back to `index.html` for SPA routing.
 pub async fn serve_embedded(path: &str) -> Response {
+    let base = dist_dir();
     let clean_path = path.trim_start_matches('/');
 
     let file_path = if clean_path.is_empty() || clean_path.starts_with("api/") {
@@ -15,11 +36,11 @@ pub async fn serve_embedded(path: &str) -> Response {
         clean_path
     };
 
-    let full_path = format!("dist/{}", file_path);
+    let full_path = base.join(file_path);
 
     match tokio::fs::read(&full_path).await {
         Ok(content) => {
-            let ext = file_path.rsplit('.').next_back().unwrap_or("");
+            let ext = file_path.rsplit('.').next().unwrap_or("");
             let mime = match ext {
                 "html" => "text/html; charset=utf-8",
                 "css" => "text/css",
@@ -42,7 +63,8 @@ pub async fn serve_embedded(path: &str) -> Response {
         }
         Err(_) => {
             // Final SPA fallback — serve index.html
-            match tokio::fs::read("dist/index.html").await {
+            let fallback = base.join("index.html");
+            match tokio::fs::read(&fallback).await {
                 Ok(content) => Response::builder()
                     .status(StatusCode::OK)
                     .header("content-type", "text/html; charset=utf-8")

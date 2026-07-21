@@ -22,7 +22,7 @@ impl Config {
     pub fn load() -> Self {
         Self {
             host: env_or("HOST", "0.0.0.0"),
-            port: env_or_parsed("PORT", 8080),
+            port: env_or_parsed("PORT", 3044),
             data_dir: PathBuf::from(env_or("DATA_DIR", "./data")),
             database_url: PathBuf::from(env_or("DATABASE_URL", "./data/populatrs.db")),
             default_interval_minutes: env_or_parsed("CHECK_INTERVAL", 60),
@@ -33,7 +33,7 @@ impl Config {
             oidc_client_id: std::env::var("OIDC_CLIENT_ID").ok(),
             oidc_client_secret: env_opt("OIDC_CLIENT_SECRET"),
             oidc_redirect_url: env_opt("OIDC_REDIRECT_URL")
-                .or_else(|| Some("http://localhost:8080/auth/callback".to_string())),
+                .or_else(|| Some("http://localhost:3044/auth/callback".to_string())),
         }
     }
 
@@ -56,7 +56,11 @@ fn env_or_parsed<T: std::str::FromStr>(key: &str, default: T) -> T {
 
 fn env_opt(key: &str) -> Option<String> {
     let v = std::env::var(key).ok()?;
-    if v.is_empty() { None } else { Some(v) }
+    if v.is_empty() {
+        None
+    } else {
+        Some(v)
+    }
 }
 
 #[cfg(test)]
@@ -76,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_env_or_parsed() {
-        assert_eq!(env_or_parsed::<u16>("UNSET_VAR_XYZ", 8080), 8080);
+        assert_eq!(env_or_parsed::<u16>("UNSET_VAR_XYZ", 3044), 3044);
     }
 
     #[test]

@@ -13,10 +13,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/auth": "http://localhost:8080",
-      "/api": "http://localhost:8080",
-      "/health": "http://localhost:8080",
-      "/assets": "http://localhost:8080",
+      "/auth": "http://localhost:3044",
+      "/api": "http://localhost:3044",
+      "/health": "http://localhost:3044",
+      "/assets": "http://localhost:3044",
     },
   },
   build: {

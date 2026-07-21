@@ -9,8 +9,8 @@ pub mod publisher;
 pub mod routes;
 pub mod template;
 
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::db::Database;
@@ -20,7 +20,6 @@ use crate::models::*;
 pub async fn run_feed_check(
     feed_manager: Arc<Mutex<FeedManager>>,
     publisher_manager: Arc<PublisherManager>,
-    published_posts: Arc<Mutex<PublishedPostsStorage>>,
     db: &Database,
     default_interval_minutes: u64,
     dry_run: bool,
@@ -122,21 +121,9 @@ pub async fn run_feed_check(
                     }
 
                     // Mark as published in DB
-                    db.mark_post_published(
-                        &post.guid,
-                        &post.feed_id,
-                        &post.title,
-                        &post.url,
-                        None,
-                    )
-                    .await
-                    .ok();
-
-                    // Also keep in-memory for legacy compatibility
-                    {
-                        let mut storage = published_posts.lock().await;
-                        storage.mark_published(&post, vec![]);
-                    }
+                    db.mark_post_published(&post.guid, &post.feed_id, &post.title, &post.url, None)
+                        .await
+                        .ok();
 
                     if successful_publishes > 0 {
                         total_published += 1;

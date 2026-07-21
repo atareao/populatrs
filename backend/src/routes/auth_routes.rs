@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use axum::{
-    Json,
     extract::{Query, State},
-    http::{StatusCode, header},
+    http::{header, StatusCode},
     response::{IntoResponse, Redirect},
+    Json,
 };
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -49,8 +49,16 @@ struct UserInfoResponse {
 #[instrument(skip(state))]
 pub async fn login(State(state): State<Arc<AppState>>) -> Redirect {
     if let Some(issuer) = &state.config.oidc_issuer_url {
-        let client_id = state.config.oidc_client_id.as_deref().unwrap_or("populatrs");
-        let redirect_uri = state.config.oidc_redirect_url.as_deref().unwrap_or("http://localhost:8080/auth/callback");
+        let client_id = state
+            .config
+            .oidc_client_id
+            .as_deref()
+            .unwrap_or("populatrs");
+        let redirect_uri = state
+            .config
+            .oidc_redirect_url
+            .as_deref()
+            .unwrap_or("http://localhost:3044/auth/callback");
         let url = format!(
             "{}/authorize?response_type=code&client_id={}&redirect_uri={}&scope=openid+profile+email",
             issuer.trim_end_matches('/'),
@@ -71,11 +79,17 @@ pub async fn callback(
 ) -> impl IntoResponse {
     let issuer = match &state.config.oidc_issuer_url {
         Some(i) => i.clone(),
-        None => return (StatusCode::BAD_GATEWAY, "OIDC not configured".to_string()).into_response(),
+        None => {
+            return (StatusCode::BAD_GATEWAY, "OIDC not configured".to_string()).into_response()
+        }
     };
     let client_id = state.config.oidc_client_id.as_deref().unwrap_or("");
     let client_secret = state.config.oidc_client_secret.as_deref().unwrap_or("");
-    let redirect_uri = state.config.oidc_redirect_url.as_deref().unwrap_or("http://localhost:8080/auth/callback");
+    let redirect_uri = state
+        .config
+        .oidc_redirect_url
+        .as_deref()
+        .unwrap_or("http://localhost:3044/auth/callback");
 
     let token_url = format!("{}/api/oidc/token", issuer.trim_end_matches('/'));
     let params = [
@@ -91,14 +105,22 @@ pub async fn callback(
         Ok(r) => r,
         Err(e) => {
             tracing::error!(error = %e, url = %token_url, "token exchange failed");
-            return (StatusCode::BAD_GATEWAY, format!("token exchange failed: {e}")).into_response();
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("token exchange failed: {e}"),
+            )
+                .into_response();
         }
     };
 
     if !token_resp.status().is_success() {
         let body = token_resp.text().await.unwrap_or_default();
         tracing::error!("token endpoint error: {}", body);
-        return (StatusCode::BAD_GATEWAY, format!("token endpoint error: {body}")).into_response();
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("token endpoint error: {body}"),
+        )
+            .into_response();
     }
 
     let token_data: TokenResponse = match token_resp.json().await {
@@ -159,7 +181,10 @@ pub async fn dev_login(
     State(_state): State<Arc<AppState>>,
     Query(query): Query<DevLoginQuery>,
 ) -> impl IntoResponse {
-    let sub = query.email.clone().unwrap_or_else(|| "dev@populatrs.app".into());
+    let sub = query
+        .email
+        .clone()
+        .unwrap_or_else(|| "dev@populatrs.app".into());
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -184,9 +209,7 @@ window.location.href = '/';
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
-pub async fn me(
-    axum::Extension(user): axum::Extension<AuthUser>,
-) -> Json<MeResponse> {
+pub async fn me(axum::Extension(user): axum::Extension<AuthUser>) -> Json<MeResponse> {
     Json(MeResponse {
         sub: user.user_id,
         email: user.email,
