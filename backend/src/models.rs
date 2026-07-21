@@ -358,6 +358,32 @@ impl Default for FeedManager {
 
 pub use crate::publisher::PublisherManager;
 
+// ───── Feed Logs (history for LogsPage) ─────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedLogEntry {
+    pub guid: String,
+    pub feed_id: String,
+    pub title: String,
+    pub url: String,
+    pub published_at: String,
+    pub publisher_results: Vec<FeedLogPublisherResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedLogPublisherResult {
+    pub publisher_id: String,
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedLogResponse {
+    pub entries: Vec<FeedLogEntry>,
+    pub total: u64,
+    pub retention_days: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

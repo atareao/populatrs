@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Button, Modal, Form, Input, Select, Switch, Typography, Space, Tag, message, Popconfirm,
+  Table, Button, Modal, Form, Input, Select, Switch, Typography, Space, Tag, message, Popconfirm, Alert,
 } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import {
@@ -73,6 +73,7 @@ export default function PublisherList() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string>("Telegram");
   const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [form] = Form.useForm();
 
   const loadData = async () => {
@@ -91,6 +92,7 @@ export default function PublisherList() {
   const handleCreate = () => {
     setEditingId(null);
     setSelectedType("Telegram");
+    setTestResult(null);
     form.resetFields();
     form.setFieldsValue({ type: "Telegram" });
     setModalOpen(true);
@@ -99,6 +101,7 @@ export default function PublisherList() {
   const handleEdit = (id: string, config: PublisherConfigEntry) => {
     setEditingId(id);
     setSelectedType(config.type);
+    setTestResult(null);
     form.setFieldsValue({
       id,
       type: config.type,
@@ -167,12 +170,15 @@ export default function PublisherList() {
   const handleTest = async () => {
     if (!editingId) return;
     setTesting(true);
+    setTestResult(null);
     try {
       const result = await testPublisher(editingId);
-      message.success(`✅ Test OK: ${result.message}`);
+      setTestResult({ type: "success", message: result.message });
+      message.success(`✅ Test OK`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      message.error(`❌ Test failed: ${msg}`);
+      setTestResult({ type: "error", message: msg });
+      message.error(`❌ Test failed`);
     } finally {
       setTesting(false);
     }
@@ -284,6 +290,18 @@ export default function PublisherList() {
         )}
       >
         <Form form={form} layout="vertical">
+          {testResult && (
+            <Form.Item>
+              <Alert
+                type={testResult.type}
+                message={testResult.type === "success" ? "✅ Test sent successfully" : "❌ Test failed"}
+                description={testResult.message}
+                showIcon
+                closable
+                onClose={() => setTestResult(null)}
+              />
+            </Form.Item>
+          )}
           {isCreating && (
             <Form.Item name="id" label="Publisher ID" rules={[{ required: true }]}>
               <Input placeholder="my-publisher" />

@@ -147,6 +147,40 @@ export async function oauthCallback(id: string, code: string, state: string): Pr
   });
 }
 
+// Logs
+export interface FeedLogPublisherResult {
+  publisher_id: string;
+  success: boolean;
+  message: string;
+}
+
+export interface FeedLogEntry {
+  guid: string;
+  feed_id: string;
+  title: string;
+  url: string;
+  published_at: string;
+  publisher_results: FeedLogPublisherResult[];
+}
+
+export interface FeedLogResponse {
+  entries: FeedLogEntry[];
+  total: number;
+  retention_days: number;
+}
+
+export async function fetchFeedLogs(limit = 50, offset = 0): Promise<FeedLogResponse> {
+  return fetcher(`/api/logs/history?limit=${limit}&offset=${offset}`);
+}
+
+export async function fetchLogRetention(): Promise<{ retention_days: number }> {
+  return fetcher("/api/logs/retention");
+}
+
+export async function updateLogRetention(days: number): Promise<{ status: string; retention_days: number }> {
+  return fetcher("/api/logs/retention", { method: "PUT", body: { retention_days: days } });
+}
+
 // Status
 export async function fetchStatus(): Promise<DashboardStatus> {
   return fetcher("/api/status");
