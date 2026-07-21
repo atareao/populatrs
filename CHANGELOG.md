@@ -1,9 +1,22 @@
 # Changelog
+## [0.3.0] - 2026-07-21
+
+### Features
+
+- *(publishers)* Test, delete, edit fix and enabled toggle for publishers (#7) (#8)
+
+### Miscellaneous Tasks
+
+- Release v0.3.0
 ## [0.2.0] - 2026-07-15
 
 ### Features
 
 - Storage config endpoint, schedule separation, pnpm migration, and dashboard improvements
+
+### Miscellaneous Tasks
+
+- Release v0.2.0
 
 ### Refactor
 
