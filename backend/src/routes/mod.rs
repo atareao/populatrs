@@ -77,6 +77,11 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         )
         .route("/api/status", routing::get(status::dashboard))
         .route("/api/logs/stream", routing::get(logs::stream))
+        .route("/api/logs/history", routing::get(logs::history))
+        .route(
+            "/api/logs/retention",
+            routing::get(logs::get_retention).put(logs::set_retention),
+        )
         .layer(middleware::from_fn(require_auth));
 
     public.merge(protected)

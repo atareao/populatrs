@@ -226,6 +226,15 @@ async fn feed_scheduler_loop(db: Database, config: Config) {
             tracing::error!("Scheduler feed check error: {}", e);
         }
 
+        // Clean up old logs based on retention setting
+        let retention_days = db.get_log_retention().await.unwrap_or(30) as i64;
+        if let Err(e) = db.cleanup_old_posts(retention_days).await {
+            tracing::error!("Failed to cleanup old posts: {}", e);
+        }
+        if let Err(e) = db.cleanup_old_publish_results(retention_days).await {
+            tracing::error!("Failed to cleanup old publish results: {}", e);
+        }
+
         tokio::time::sleep(std::time::Duration::from_secs(interval * 60)).await;
     }
 }

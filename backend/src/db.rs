@@ -8,7 +8,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Mutex;
 
 use crate::models::{
-    FeedConfig, FeedTypeConfig, PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
+    FeedConfig, FeedLogEntry, FeedLogPublisherResult, FeedLogResponse, FeedTypeConfig,
+    PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
 };
 
 /// Database handle wrapping a SQLite connection.
@@ -93,6 +94,9 @@ impl Database {
                 published_at TEXT NOT NULL,
                 FOREIGN KEY (guid, feed_id) REFERENCES published_posts(guid, feed_id)
             );
+
+            CREATE INDEX IF NOT EXISTS idx_publish_results_published_at
+                ON publish_results(published_at);
 
             CREATE TABLE IF NOT EXISTS feed_cache (
                 feed_id TEXT PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE,
@@ -497,6 +501,123 @@ impl Database {
             )
             .context("Failed to cleanup old posts")?;
         Ok(deleted as u64)
+    }
+
+    /// Clean up old publish results (older than `days`).
+    pub async fn cleanup_old_publish_results(&self, days: i64) -> Result<u64> {
+        let conn = self.conn.lock().await;
+        let cutoff = (Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        let deleted = conn
+            .execute(
+                "DELETE FROM publish_results WHERE published_at < ?1",
+                params![cutoff],
+            )
+            .context("Failed to cleanup old publish results")?;
+        Ok(deleted as u64)
+    }
+
+    /// List feed log entries with their publisher results.
+    pub async fn list_feed_logs(&self, limit: i64, offset: i64) -> Result<FeedLogResponse> {
+        let conn = self.conn.lock().await;
+
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM published_posts", [], |row| row.get(0))
+            .context("Failed to count feed logs")?;
+
+        let retention_days = self
+            .get_setting("log_retention_days")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT pp.guid, pp.feed_id, pp.title, pp.url, pp.published_at,
+                        pr.publisher_id, pr.success, pr.message
+                 FROM published_posts pp
+                 LEFT JOIN publish_results pr ON pp.guid = pr.guid AND pp.feed_id = pr.feed_id
+                 ORDER BY pp.published_at DESC
+                 LIMIT ?1 OFFSET ?2",
+            )
+            .context("Failed to prepare list_feed_logs")?;
+
+        let rows = stmt
+            .query_map(params![limit, offset], |row| {
+                let guid: String = row.get(0)?;
+                let feed_id: String = row.get(1)?;
+                let title: String = row.get(2)?;
+                let url: String = row.get(3)?;
+                let published_at: String = row.get(4)?;
+                let publisher_id: Option<String> = row.get(5)?;
+                let success: Option<i32> = row.get(6)?;
+                let message: Option<String> = row.get(7)?;
+                Ok((
+                    guid,
+                    feed_id,
+                    title,
+                    url,
+                    published_at,
+                    publisher_id,
+                    success,
+                    message,
+                ))
+            })
+            .context("Failed to query feed logs")?;
+
+        // Group by post, preserving ORDER BY
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        let mut entries: Vec<FeedLogEntry> = Vec::new();
+
+        for row in rows {
+            let (guid, feed_id, title, url, published_at, publisher_id, success, message) = row?;
+
+            if seen.insert(guid.clone()) {
+                entries.push(FeedLogEntry {
+                    guid: guid.clone(),
+                    feed_id: feed_id.clone(),
+                    title: title.clone(),
+                    url: url.clone(),
+                    published_at: published_at.clone(),
+                    publisher_results: Vec::new(),
+                });
+            }
+
+            if let Some(pid) = publisher_id {
+                if let Some(entry) = entries.last_mut() {
+                    entry.publisher_results.push(FeedLogPublisherResult {
+                        publisher_id: pid,
+                        success: success.unwrap_or(0) != 0,
+                        message: message.unwrap_or_default(),
+                    });
+                }
+            }
+        }
+
+        Ok(FeedLogResponse {
+            entries,
+            total: total as u64,
+            retention_days,
+        })
+    }
+
+    /// Get the log retention days setting.
+    pub async fn get_log_retention(&self) -> Result<u64> {
+        Ok(self
+            .get_setting("log_retention_days")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30))
+    }
+
+    /// Set the log retention days setting.
+    pub async fn set_log_retention(&self, days: u64) -> Result<()> {
+        self.set_setting("log_retention_days", &days.to_string())
+            .await
     }
 
     // ───── Feed Cache ─────
