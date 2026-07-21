@@ -1,13 +1,21 @@
 [Unit]
 Description=Populatrs RSS Feed Publisher
+Documentation=https://github.com/atareao/populatrs
+After=network-online.target
 
 [Container]
-Image=localhost/populatrs:latest
-EnvironmentFile=/data/rust/populatrs/populatrs.env
-Volume=/data/rust/populatrs/data:/app/data
-PublishPort=8099:8080
+Image=localhost/atareao/populatrs:latest
+ContainerName=populatrs
+PodmanArgs=--init
 UserNS=keep-id
-HealthCmd=wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+Volume=/data/rust/populatrs/data:/app/data
+
+PublishPort=3044:3044
+
+EnvironmentFile=/data/rust/populatrs/populatrs.env
+
+HealthCmd=wget --no-verbose --tries=1 --spider http://localhost:3044/health || exit 1
 HealthInterval=30s
 HealthRetries=3
 HealthStartPeriod=10s

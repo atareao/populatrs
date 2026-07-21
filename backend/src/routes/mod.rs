@@ -1,5 +1,7 @@
 pub mod auth_routes;
 pub mod feeds;
+pub mod logs;
+pub mod oauth;
 pub mod publishers;
 pub mod schedule;
 pub mod status;
@@ -7,7 +9,7 @@ pub mod storage;
 
 use std::sync::Arc;
 
-use axum::{Json, Router, middleware, routing};
+use axum::{middleware, routing, Json, Router};
 use serde::Serialize;
 
 use crate::auth::AppState;
@@ -43,14 +45,38 @@ pub fn api_routes() -> Router<Arc<AppState>> {
                 .patch(feeds::toggle),
         )
         .route("/api/feeds/{id}/run", routing::post(feeds::run))
-        .route("/api/publishers", routing::get(publishers::list))
+        .route(
+            "/api/publishers",
+            routing::get(publishers::list).post(publishers::create),
+        )
         .route(
             "/api/publishers/{id}",
-            routing::put(publishers::update_by_id),
+            routing::put(publishers::update_by_id)
+                .delete(publishers::delete_publisher)
+                .patch(publishers::toggle_publisher),
         )
-        .route("/api/schedule", routing::get(schedule::get).put(schedule::update))
-        .route("/api/storage", routing::get(storage::get).put(storage::update))
+        .route(
+            "/api/publishers/{id}/test",
+            routing::post(publishers::test_publisher),
+        )
+        .route(
+            "/api/publishers/{id}/oauth/authorize",
+            routing::get(oauth::authorize),
+        )
+        .route(
+            "/api/publishers/{id}/oauth/callback",
+            routing::post(oauth::callback),
+        )
+        .route(
+            "/api/schedule",
+            routing::get(schedule::get).put(schedule::update),
+        )
+        .route(
+            "/api/storage",
+            routing::get(storage::get).put(storage::update),
+        )
         .route("/api/status", routing::get(status::dashboard))
+        .route("/api/logs/stream", routing::get(logs::stream))
         .layer(middleware::from_fn(require_auth));
 
     public.merge(protected)

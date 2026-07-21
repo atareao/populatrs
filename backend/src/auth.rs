@@ -2,11 +2,22 @@ use std::sync::Arc;
 
 use base64::Engine;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use serde::Deserialize;
-use tokio::sync::RwLock;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{broadcast, RwLock};
 
 use crate::config::Config;
 use crate::db::Database;
+
+// ───── Log Entry (broadcast via SSE) ─────
+
+/// A single log entry sent via SSE to the LogsPage.
+#[derive(Debug, Clone, Serialize)]
+pub struct LogEntry {
+    pub timestamp: String,
+    pub level: String,
+    pub message: String,
+    pub target: String,
+}
 
 // ───── OIDC Discovery ─────
 
@@ -37,7 +48,8 @@ pub struct JwksResponse {
 
 // ───── OIDC State ─────
 
-pub type OidcStates = Arc<tokio::sync::Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>;
+pub type OidcStates =
+    Arc<tokio::sync::Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>;
 
 // ───── JWT Validator ─────
 
@@ -141,10 +153,13 @@ pub struct AppState {
     pub oidc_metadata: Option<OidcMetadata>,
     pub jwt_validator: Arc<JwtValidator>,
     pub oidc_states: OidcStates,
+    pub oauth_states: OidcStates,
+    /// Broadcast sender for log entries (SSE to LogsPage).
+    pub log_tx: broadcast::Sender<LogEntry>,
 }
 
 impl AppState {
-    pub fn new(config: Config, db: Database) -> Self {
+    pub fn new(config: Config, db: Database, log_tx: broadcast::Sender<LogEntry>) -> Self {
         let jwt_validator = if config.oidc_configured() {
             JwtValidator::new(
                 config.oidc_issuer_url.as_deref().unwrap_or(""),
@@ -160,6 +175,8 @@ impl AppState {
             oidc_metadata: None,
             jwt_validator: Arc::new(jwt_validator),
             oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            log_tx,
         }
     }
 }
@@ -168,7 +185,8 @@ impl AppState {
 fn _assert_send_sync()
 where
     AppState: Send + Sync,
-{}
+{
+}
 
 // ───── AuthUser (extracted from validated token) ─────
 

@@ -14,7 +14,7 @@ const mockFeeds = {
 };
 
 const mockPublishers = {
-  publishers: { telegram: { type: "Telegram", config: { bot_token: "xxx" } } },
+  publishers: { telegram: { type: "Telegram", config: { bot_token: "xxx" }, enabled: true } },
   total: 1,
 };
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Card, Form, Input, Button, Typography, message, Spin, Descriptions, Tag, Alert } from "antd";
-import { DatabaseOutlined, SaveOutlined, InfoCircleOutlined, FolderOutlined, FileTextOutlined } from "@ant-design/icons";
+import { Card, Form, Input, Button, Typography, message, Spin, Descriptions, Alert } from "antd";
+import { DatabaseOutlined, SaveOutlined, InfoCircleOutlined, FolderOutlined } from "@ant-design/icons";
 import { fetchStorage, updateStorage, type StorageConfig } from "../api/http";
 
 const { Title } = Typography;
@@ -9,7 +9,6 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [currentDataDir, setCurrentDataDir] = useState<string>("");
-  const [currentPostsFile, setCurrentPostsFile] = useState<string>("");
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -17,7 +16,6 @@ export default function Settings() {
       .then((data) => {
         form.setFieldsValue(data);
         setCurrentDataDir(data.data_dir);
-        setCurrentPostsFile(data.published_posts_file);
       })
       .catch(() => message.error("Failed to load storage config"))
       .finally(() => setLoading(false));
@@ -28,7 +26,6 @@ export default function Settings() {
     try {
       await updateStorage(values);
       setCurrentDataDir(values.data_dir);
-      setCurrentPostsFile(values.published_posts_file);
       message.success("Storage config saved");
     } catch {
       message.error("Failed to save storage config");
@@ -51,9 +48,6 @@ export default function Settings() {
           <Descriptions.Item label={<><FolderOutlined /> Data Directory</>}>
             <code>{currentDataDir}</code>
           </Descriptions.Item>
-          <Descriptions.Item label={<><FileTextOutlined /> Published Posts File</>}>
-            <code>{currentPostsFile}</code>
-          </Descriptions.Item>
         </Descriptions>
       </Card>
 
@@ -70,7 +64,7 @@ export default function Settings() {
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
-          initialValues={{ data_dir: "./data", published_posts_file: "published_posts.json" }}
+          initialValues={{ data_dir: "./data" }}
         >
           <Form.Item
             name="data_dir"
@@ -79,14 +73,6 @@ export default function Settings() {
             help="Path where data files are stored (e.g. ./data, /app/data)"
           >
             <Input placeholder="./data" />
-          </Form.Item>
-          <Form.Item
-            name="published_posts_file"
-            label="Published Posts File"
-            rules={[{ required: true, message: "Please enter the filename" }]}
-            help="File name for tracking already-published posts"
-          >
-            <Input placeholder="published_posts.json" />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={saving} icon={<SaveOutlined />}>
             Save Changes

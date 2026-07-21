@@ -55,7 +55,7 @@ COPY --from=frontend-builder /build/dist ./dist
 RUN mkdir -p /app/data && chown -R app:app /app
 
 USER app
-EXPOSE 8080
+EXPOSE 3044
 ENV RUST_LOG=info
 
 CMD ["./populatrs"]

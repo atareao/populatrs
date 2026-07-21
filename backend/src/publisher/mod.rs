@@ -50,10 +50,16 @@ pub fn create_publisher_with_config_path(
             message_thread_id,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("telegram"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("telegram"));
             Ok(Box::new(TelegramPublisher::new(
-                id, bot_token.clone(), chat_id.clone(),
-                parse_mode.clone(), message_thread_id.clone(), template_str,
+                id,
+                bot_token.clone(),
+                chat_id.clone(),
+                parse_mode.clone(),
+                message_thread_id.clone(),
+                template_str,
             )))
         }
         PublisherConfig::X {
@@ -64,11 +70,18 @@ pub fn create_publisher_with_config_path(
             redirect_uri,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("x"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("x"));
             Ok(Box::new(XPublisher::new(
-                id, client_id.clone(), client_secret.clone(),
-                access_token.clone(), refresh_token.clone(), redirect_uri.clone(),
-                template_str, config_path,
+                id,
+                client_id.clone(),
+                client_secret.clone(),
+                access_token.clone(),
+                refresh_token.clone(),
+                redirect_uri.clone(),
+                template_str,
+                config_path,
             )))
         }
         PublisherConfig::Mastodon {
@@ -76,9 +89,14 @@ pub fn create_publisher_with_config_path(
             access_token,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("mastodon"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("mastodon"));
             Ok(Box::new(MastodonPublisher::new(
-                id, server_url.clone(), access_token.clone(), template_str,
+                id,
+                server_url.clone(),
+                access_token.clone(),
+                template_str,
             )))
         }
         PublisherConfig::LinkedIn {
@@ -90,11 +108,19 @@ pub fn create_publisher_with_config_path(
             redirect_uri,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("linkedin"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("linkedin"));
             Ok(Box::new(LinkedInPublisher::new(
-                id, client_id.clone(), client_secret.clone(),
-                access_token.clone(), refresh_token.clone(), user_id.clone(),
-                redirect_uri.clone(), template_str, config_path,
+                id,
+                client_id.clone(),
+                client_secret.clone(),
+                access_token.clone(),
+                refresh_token.clone(),
+                user_id.clone(),
+                redirect_uri.clone(),
+                template_str,
+                config_path,
             )))
         }
         PublisherConfig::OpenObserve {
@@ -104,10 +130,16 @@ pub fn create_publisher_with_config_path(
             access_token,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("openobserve"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("openobserve"));
             Ok(Box::new(OpenObservePublisher::new(
-                id, url.clone(), organization.clone(), stream_name.clone(),
-                access_token.clone(), template_str,
+                id,
+                url.clone(),
+                organization.clone(),
+                stream_name.clone(),
+                access_token.clone(),
+                template_str,
             )))
         }
         PublisherConfig::Matrix {
@@ -116,9 +148,15 @@ pub fn create_publisher_with_config_path(
             room_id,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("matrix"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("matrix"));
             Ok(Box::new(MatrixPublisher::new(
-                id, homeserver_url.clone(), access_token.clone(), room_id.clone(), template_str,
+                id,
+                homeserver_url.clone(),
+                access_token.clone(),
+                room_id.clone(),
+                template_str,
             )))
         }
         PublisherConfig::Bluesky {
@@ -127,9 +165,15 @@ pub fn create_publisher_with_config_path(
             pds_url,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("bluesky"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("bluesky"));
             Ok(Box::new(BlueskyPublisher::new(
-                id, handle.clone(), password.clone(), pds_url.clone(), template_str,
+                id,
+                handle.clone(),
+                password.clone(),
+                pds_url.clone(),
+                template_str,
             )))
         }
         PublisherConfig::Threads {
@@ -137,18 +181,27 @@ pub fn create_publisher_with_config_path(
             user_id,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("threads"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("threads"));
             Ok(Box::new(ThreadsPublisher::new(
-                id, access_token.clone(), user_id.clone(), template_str,
+                id,
+                access_token.clone(),
+                user_id.clone(),
+                template_str,
             )))
         }
         PublisherConfig::Discord {
             webhook_url,
             template,
         } => {
-            let template_str = template.clone().unwrap_or_else(|| get_default_template("discord"));
+            let template_str = template
+                .clone()
+                .unwrap_or_else(|| get_default_template("discord"));
             Ok(Box::new(DiscordPublisher::new(
-                id, webhook_url.clone(), template_str,
+                id,
+                webhook_url.clone(),
+                template_str,
             )))
         }
     }
@@ -157,32 +210,17 @@ pub fn create_publisher_with_config_path(
 /// Get the default template string for a given publisher type.
 pub fn get_default_template(publisher_type: &str) -> String {
     match publisher_type {
-        "telegram" => {
-            "📰 *{{ title }}*\n\n{{ description }}\n\n🔗 {{ url }}".to_string()
-        }
-        "x" => {
-            "{{ title }}\n\n{{ url }}".to_string()
-        }
-        "mastodon" => {
-            "{{ title }}\n\n{{ url }}\n\n{{ description }}".to_string()
-        }
-        "linkedin" => {
-            "{{ title }}\n\n{{ description }}\n\n🔗 {{ url }}".to_string()
-        }
-        "bluesky" => {
-            "{{ title }}\n\n{{ url }}".to_string()
-        }
-        "threads" => {
-            "{{ title }}\n\n{{ url }}".to_string()
-        }
-        "discord" => {
-            "**{{ title }}**\n\n{{ description }}\n\n{{ url }}".to_string()
-        }
-        "matrix" => {
-            "📰 {{ title }}\n\n{{ description }}\n\n🔗 {{ url }}".to_string()
-        }
+        "telegram" => "📰 *{{ title }}*\n\n{{ description }}\n\n🔗 {{ url }}".to_string(),
+        "x" => "{{ title }}\n\n{{ url }}".to_string(),
+        "mastodon" => "{{ title }}\n\n{{ url }}\n\n{{ description }}".to_string(),
+        "linkedin" => "{{ title }}\n\n{{ description }}\n\n🔗 {{ url }}".to_string(),
+        "bluesky" => "{{ title }}\n\n{{ url }}".to_string(),
+        "threads" => "{{ title }}\n\n{{ url }}".to_string(),
+        "discord" => "**{{ title }}**\n\n{{ description }}\n\n{{ url }}".to_string(),
+        "matrix" => "📰 {{ title }}\n\n{{ description }}\n\n🔗 {{ url }}".to_string(),
         "openobserve" => {
-            r#"{"title": "{{ title }}", "url": "{{ url }}", "description": "{{ description }}"}"#.to_string()
+            r#"{"title": "{{ title }}", "url": "{{ url }}", "description": "{{ description }}"}"#
+                .to_string()
         }
         _ => "{{ title }} - {{ url }}".to_string(),
     }
@@ -210,7 +248,8 @@ impl PublisherManager {
     }
 
     pub fn add_publisher(&mut self, id: String, config: &PublisherConfig) -> Result<()> {
-        let publisher = create_publisher_with_config_path(id.clone(), config, self.config_path.clone())?;
+        let publisher =
+            create_publisher_with_config_path(id.clone(), config, self.config_path.clone())?;
         self.publishers.insert(id, publisher);
         Ok(())
     }
