@@ -1,4 +1,10 @@
 # Changelog
+## [0.3.4] - 2026-07-23
+
+### Miscellaneous Tasks
+
+- Use GH_PAT for git push in release-prepare to trigger Release workflow
+- Fix release-prepare to use GH_PAT for git push
 ## [0.3.3] - 2026-07-23
 
 ### Bug Fixes
@@ -9,6 +15,7 @@
 
 ### Miscellaneous Tasks
 
+- Release v0.3.3
 - Release v0.3.3
 ## [0.3.2] - 2026-07-23
 
