@@ -323,9 +323,14 @@ export default function PublisherList() {
             </Form.Item>
           ))}
 
-          <Form.Item name={["config", "template"]} label="Template (optional)">
-            <Input.TextArea rows={3} placeholder="Custom template for this publisher" />
-          </Form.Item>
+          <Form.Item
+                name={["config", "template"]}
+                label="Template"
+                rules={[{ required: true, message: "Template is required" }]}
+                extra="Use {{ title }}, {{ description }}, {{ url }} variables"
+              >
+                <Input.TextArea rows={3} placeholder="📰 *{{ title }}* - {{ url }}" />
+              </Form.Item>
         </Form>
       </Modal>
     </div>

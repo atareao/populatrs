@@ -10,6 +10,7 @@ pub mod routes;
 pub mod template;
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -55,7 +56,22 @@ pub async fn run_feed_check(
                     }
                 };
 
-                if publisher_ids.is_empty() {
+                let feed_templates: HashMap<String, String> = publisher_ids
+                    .iter()
+                    .filter_map(|b| {
+                        b.template
+                            .clone()
+                            .filter(|t| !t.is_empty())
+                            .map(|t| (b.publisher_id.clone(), t))
+                    })
+                    .collect();
+
+                let pub_ids: Vec<String> = publisher_ids
+                    .iter()
+                    .map(|b| b.publisher_id.clone())
+                    .collect();
+
+                if pub_ids.is_empty() {
                     tracing::warn!("No publishers configured for feed: {}", feed_id);
                     continue;
                 }
@@ -77,20 +93,25 @@ pub async fn run_feed_check(
                     if dry_run {
                         tracing::info!(
                             "[DRY RUN] Would publish to {} publishers: {:?}",
-                            publisher_ids.len(),
-                            publisher_ids
+                            pub_ids.len(),
+                            pub_ids
                         );
                         continue;
                     }
 
+                    // Mark as published in DB first (FK reference for publish_results)
+                    db.mark_post_published(&post.guid, &post.feed_id, &post.title, &post.url, None)
+                        .await
+                        .ok();
+
                     let results = publisher_manager
-                        .publish_to_all(&post, &publisher_ids)
+                        .publish_to_all(&post, &pub_ids, &feed_templates)
                         .await;
 
                     let mut successful_publishes = 0;
 
                     for (i, result) in results.into_iter().enumerate() {
-                        let publisher_id = &publisher_ids[i];
+                        let publisher_id = &pub_ids[i];
                         match result {
                             Ok(message) => {
                                 tracing::info!("✓ Published to {}: {}", publisher_id, message);
@@ -120,18 +141,13 @@ pub async fn run_feed_check(
                         }
                     }
 
-                    // Mark as published in DB
-                    db.mark_post_published(&post.guid, &post.feed_id, &post.title, &post.url, None)
-                        .await
-                        .ok();
-
                     if successful_publishes > 0 {
                         total_published += 1;
                         tracing::info!(
                             "Successfully published \"{}\" to {}/{} publishers",
                             post.title,
                             successful_publishes,
-                            publisher_ids.len()
+                            pub_ids.len()
                         );
                     }
 

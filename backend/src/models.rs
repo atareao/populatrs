@@ -49,6 +49,16 @@ impl Default for AppConfig {
     }
 }
 
+// ───── Feed-Publisher binding ─────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedPublisherBinding {
+    pub publisher_id: String,
+    /// Optional per-feed template override. If empty/None, the publisher's
+    /// default template is used instead.
+    pub template: Option<String>,
+}
+
 // ───── Feeds ─────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,8 +70,7 @@ pub struct FeedConfig {
     pub config: FeedTypeConfig,
     pub enabled: bool,
     #[serde(default)]
-    pub publishers: Vec<String>,
-    pub check_interval_minutes: Option<u64>,
+    pub publishers: Vec<FeedPublisherBinding>,
     pub max_retries: Option<u32>,
     pub retry_delay_seconds: Option<u64>,
 }
@@ -90,7 +99,7 @@ pub enum PublisherConfig {
         chat_id: String,
         parse_mode: Option<String>,
         message_thread_id: Option<String>,
-        template: Option<String>,
+        template: String,
     },
     X {
         client_id: String,
@@ -98,12 +107,12 @@ pub enum PublisherConfig {
         access_token: Option<String>,
         refresh_token: Option<String>,
         redirect_uri: Option<String>,
-        template: Option<String>,
+        template: String,
     },
     Mastodon {
         server_url: String,
         access_token: String,
-        template: Option<String>,
+        template: String,
     },
     LinkedIn {
         client_id: String,
@@ -112,35 +121,35 @@ pub enum PublisherConfig {
         refresh_token: Option<String>,
         user_id: Option<String>,
         redirect_uri: Option<String>,
-        template: Option<String>,
+        template: String,
     },
     OpenObserve {
         url: String,
         organization: String,
         stream_name: String,
         access_token: String,
-        template: Option<String>,
+        template: String,
     },
     Matrix {
         homeserver_url: String,
         access_token: String,
         room_id: String,
-        template: Option<String>,
+        template: String,
     },
     Bluesky {
         handle: String,
         password: String,
         pds_url: Option<String>,
-        template: Option<String>,
+        template: String,
     },
     Threads {
         access_token: String,
         user_id: String,
-        template: Option<String>,
+        template: String,
     },
     Discord {
         webhook_url: String,
-        template: Option<String>,
+        template: String,
     },
 }
 
@@ -341,7 +350,15 @@ impl FeedManager {
                 continue;
             }
             let feed = Feed::new(feed_config.clone(), self.youtube_config.clone());
-            let result = feed.fetch_posts().await;
+            let result = feed.fetch_posts().await.map(|posts| {
+                posts
+                    .into_iter()
+                    .map(|mut p| {
+                        p.feed_id = feed_config.id.clone();
+                        p
+                    })
+                    .collect()
+            });
             results.push((feed_config.id.clone(), result));
         }
         results
@@ -396,7 +413,7 @@ mod tests {
                 chat_id: String::new(),
                 parse_mode: None,
                 message_thread_id: None,
-                template: None,
+                template: String::new(),
             }
             .type_name(),
             "telegram"
@@ -408,7 +425,7 @@ mod tests {
                 access_token: None,
                 refresh_token: None,
                 redirect_uri: None,
-                template: None,
+                template: String::new(),
             }
             .type_name(),
             "x"
@@ -418,7 +435,7 @@ mod tests {
                 handle: String::new(),
                 password: String::new(),
                 pds_url: None,
-                template: None,
+                template: String::new(),
             }
             .type_name(),
             "bluesky"

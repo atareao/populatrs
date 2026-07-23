@@ -155,6 +155,13 @@ pub async fn run(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> 
     let feed = crate::models::Feed::new(feed_config.clone(), None);
     match feed.fetch_posts().await {
         Ok(posts) => {
+            let posts: Vec<_> = posts
+                .into_iter()
+                .map(|mut p| {
+                    p.feed_id = id.clone();
+                    p
+                })
+                .collect();
             tracing::info!(count = posts.len(), feed_id = %id, "Manual feed run completed");
             (
                 StatusCode::OK,

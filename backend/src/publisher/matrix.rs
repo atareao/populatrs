@@ -38,7 +38,10 @@ impl MatrixPublisher {
 
 #[async_trait]
 impl Publisher for MatrixPublisher {
-    async fn publish(&self, post: &Post) -> Result<String> {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
         let txn_id = uuid::Uuid::new_v4().to_string();
         let url = format!(
             "{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
@@ -53,7 +56,7 @@ impl Publisher for MatrixPublisher {
             url: post.url.clone(),
         };
 
-        let message = self.renderer.render(&self.template, &context)?;
+        let message = self.renderer.render(template_str, &context)?;
 
         let payload = json!({
             "msgtype": "m.text",

@@ -294,14 +294,17 @@ impl XPublisher {
 }
 #[async_trait]
 impl Publisher for XPublisher {
-    async fn publish(&self, post: &Post) -> Result<String> {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
         let context = TemplateContext {
             title: post.title.clone(),
             description: post.description.clone().unwrap_or_default(),
             url: post.url.clone(),
         };
 
-        let tweet_text = self.renderer.render(&self.template, &context)?;
+        let tweet_text = self.renderer.render(template_str, &context)?;
 
         // Truncate to Twitter's character limit
         let tweet_text = if tweet_text.len() > 280 {
