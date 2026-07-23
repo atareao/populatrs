@@ -4,7 +4,7 @@ use std::time::Instant;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     Json,
 };
 use serde::Deserialize;
@@ -32,9 +32,8 @@ pub struct OAuthCallbackQuery {
 /// `GET /api/publishers/{id}/oauth/authorize`
 ///
 /// Generates an OAuth 2.0 authorization URL for an X/Twitter or LinkedIn
-/// publisher.  The OAuth state (code_verifier for X, state parameter for
-/// LinkedIn) is stored in `AppState.oauth_states` so it can be retrieved
-/// when the callback arrives.
+/// publisher. The OAuth state is stored in `AppState.oauth_states` so it
+/// can be retrieved when the callback arrives.
 pub async fn authorize(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -220,12 +219,31 @@ pub async fn callback(
             }
         };
 
+        // Obtener el user_id de LinkedIn automáticamente
+        let user_id = match li_pub.get_user_profile(&access_token).await {
+            Ok(profile_urn) => {
+                tracing::info!("LinkedIn user profile URN: {}", profile_urn);
+                // Extraer solo el ID del URN (urn:li:person:XXXXX → XXXXX)
+                let id = profile_urn
+                    .strip_prefix("urn:li:person:")
+                    .unwrap_or(&profile_urn)
+                    .strip_prefix("urn:li:")
+                    .unwrap_or(&profile_urn)
+                    .to_string();
+                Some(id)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get LinkedIn user profile: {}", e);
+                None
+            }
+        };
+
         let updated = PublisherConfig::LinkedIn {
             client_id: li_pub.client_id.clone(),
             client_secret: li_pub.client_secret.clone(),
             access_token: Some(access_token),
             refresh_token,
-            user_id: li_pub.user_id.clone(),
+            user_id,
             redirect_uri: Some(li_pub.redirect_uri.clone()),
             template: li_pub.template.clone(),
         };
@@ -391,12 +409,30 @@ pub async fn callback_get(
             }
         };
 
+        // Obtener el user_id de LinkedIn automáticamente
+        let user_id = match li_pub.get_user_profile(&access_token).await {
+            Ok(profile_urn) => {
+                tracing::info!("LinkedIn user profile URN: {}", profile_urn);
+                let id = profile_urn
+                    .strip_prefix("urn:li:person:")
+                    .unwrap_or(&profile_urn)
+                    .strip_prefix("urn:li:")
+                    .unwrap_or(&profile_urn)
+                    .to_string();
+                Some(id)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get LinkedIn user profile: {}", e);
+                None
+            }
+        };
+
         let updated = PublisherConfig::LinkedIn {
             client_id: li_pub.client_id.clone(),
             client_secret: li_pub.client_secret.clone(),
             access_token: Some(access_token),
             refresh_token,
-            user_id: li_pub.user_id.clone(),
+            user_id,
             redirect_uri: Some(li_pub.redirect_uri.clone()),
             template: li_pub.template.clone(),
         };
@@ -552,5 +588,3 @@ fn oauth_result_html(success: bool, message: &str) -> String {
 </html>"#
     )
 }
-
-use axum::response::Html;
