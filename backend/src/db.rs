@@ -8,7 +8,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Mutex;
 
 use crate::models::{
-    FeedConfig, FeedTypeConfig, PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
+    FeedConfig, FeedLogEntry, FeedLogPublisherResult, FeedLogResponse, FeedPublisherBinding,
+    FeedTypeConfig, PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
 };
 
 /// Database handle wrapping a SQLite connection.
@@ -50,7 +51,6 @@ impl Database {
                 feed_type TEXT NOT NULL,
                 config_json TEXT NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
-                check_interval_minutes INTEGER,
                 max_retries INTEGER,
                 retry_delay_seconds INTEGER,
                 created_at TEXT NOT NULL,
@@ -70,6 +70,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS feed_publishers (
                 feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
                 publisher_id TEXT NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+                template TEXT,
                 PRIMARY KEY (feed_id, publisher_id)
             );
 
@@ -94,6 +95,9 @@ impl Database {
                 FOREIGN KEY (guid, feed_id) REFERENCES published_posts(guid, feed_id)
             );
 
+            CREATE INDEX IF NOT EXISTS idx_publish_results_published_at
+                ON publish_results(published_at);
+
             CREATE TABLE IF NOT EXISTS feed_cache (
                 feed_id TEXT PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE,
                 etag TEXT,
@@ -108,6 +112,10 @@ impl Database {
             ",
         )
         .context("Failed to run database migrations")?;
+
+        // Migration: add template column to feed_publishers for existing databases
+        let _ = conn.execute_batch("ALTER TABLE feed_publishers ADD COLUMN template TEXT;");
+
         Ok(())
     }
 
@@ -118,7 +126,7 @@ impl Database {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, feed_type, config_json, enabled, check_interval_minutes, \
+                "SELECT id, name, feed_type, config_json, enabled, \
                  max_retries, retry_delay_seconds, created_at, updated_at FROM feeds ORDER BY name",
             )
             .context("Failed to prepare list_feeds")?;
@@ -130,9 +138,8 @@ impl Database {
                 let feed_type: String = row.get(2)?;
                 let config_json: String = row.get(3)?;
                 let enabled: bool = row.get::<_, i32>(4)? != 0;
-                let check_interval: Option<i64> = row.get(5)?;
-                let max_retries: Option<i32> = row.get(6)?;
-                let retry_delay: Option<i64> = row.get(7)?;
+                let max_retries: Option<i32> = row.get(5)?;
+                let retry_delay: Option<i64> = row.get(6)?;
 
                 let config: FeedTypeConfig = serde_json::from_str(&config_json)
                     .unwrap_or(FeedTypeConfig::Rss { url: String::new() });
@@ -144,7 +151,6 @@ impl Database {
                     config,
                     enabled,
                     publishers: Vec::new(), // filled below
-                    check_interval_minutes: check_interval.map(|v| v as u64),
                     max_retries: max_retries.map(|v| v as u32),
                     retry_delay_seconds: retry_delay.map(|v| v as u64),
                 })
@@ -154,15 +160,22 @@ impl Database {
         let mut result = Vec::new();
         for feed in feeds {
             let mut feed = feed?;
-            // Load linked publishers
+            // Load linked publishers with optional template override
             let mut pstmt = conn
-                .prepare("SELECT publisher_id FROM feed_publishers WHERE feed_id = ?1")
+                .prepare("SELECT publisher_id, template FROM feed_publishers WHERE feed_id = ?1")
                 .context("Failed to prepare feed_publishers query")?;
-            let pub_ids: Vec<String> = pstmt
-                .query_map(params![&feed.id], |row| row.get(0))?
+            let bindings: Vec<FeedPublisherBinding> = pstmt
+                .query_map(params![&feed.id], |row| {
+                    let publisher_id: String = row.get(0)?;
+                    let template: Option<String> = row.get(1)?;
+                    Ok(FeedPublisherBinding {
+                        publisher_id,
+                        template,
+                    })
+                })?
                 .filter_map(|r| r.ok())
                 .collect();
-            feed.publishers = pub_ids;
+            feed.publishers = bindings;
             result.push(feed);
         }
         Ok(result)
@@ -173,7 +186,7 @@ impl Database {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, feed_type, config_json, enabled, check_interval_minutes, \
+                "SELECT id, name, feed_type, config_json, enabled, \
                  max_retries, retry_delay_seconds FROM feeds WHERE id = ?1",
             )
             .context("Failed to prepare get_feed")?;
@@ -185,9 +198,8 @@ impl Database {
                 let feed_type: String = row.get(2)?;
                 let config_json: String = row.get(3)?;
                 let enabled: bool = row.get::<_, i32>(4)? != 0;
-                let check_interval: Option<i64> = row.get(5)?;
-                let max_retries: Option<i32> = row.get(6)?;
-                let retry_delay: Option<i64> = row.get(7)?;
+                let max_retries: Option<i32> = row.get(5)?;
+                let retry_delay: Option<i64> = row.get(6)?;
 
                 let config: FeedTypeConfig = serde_json::from_str(&config_json)
                     .unwrap_or(FeedTypeConfig::Rss { url: String::new() });
@@ -199,7 +211,6 @@ impl Database {
                     config,
                     enabled,
                     publishers: Vec::new(),
-                    check_interval_minutes: check_interval.map(|v| v as u64),
                     max_retries: max_retries.map(|v| v as u32),
                     retry_delay_seconds: retry_delay.map(|v| v as u64),
                 })
@@ -208,13 +219,20 @@ impl Database {
             .context("Failed to query feed")?;
 
         if let Some(mut feed) = feed {
-            let mut pstmt =
-                conn.prepare("SELECT publisher_id FROM feed_publishers WHERE feed_id = ?1")?;
-            let pub_ids: Vec<String> = pstmt
-                .query_map(params![id], |row| row.get(0))?
+            let mut pstmt = conn
+                .prepare("SELECT publisher_id, template FROM feed_publishers WHERE feed_id = ?1")?;
+            let bindings: Vec<FeedPublisherBinding> = pstmt
+                .query_map(params![id], |row| {
+                    let publisher_id: String = row.get(0)?;
+                    let template: Option<String> = row.get(1)?;
+                    Ok(FeedPublisherBinding {
+                        publisher_id,
+                        template,
+                    })
+                })?
                 .filter_map(|r| r.ok())
                 .collect();
-            feed.publishers = pub_ids;
+            feed.publishers = bindings;
             Ok(Some(feed))
         } else {
             Ok(None)
@@ -229,15 +247,14 @@ impl Database {
 
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT INTO feeds (id, name, feed_type, config_json, enabled, check_interval_minutes, \
-             max_retries, retry_delay_seconds, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO feeds (id, name, feed_type, config_json, enabled, \
+             max_retries, retry_delay_seconds, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 feed.id,
                 feed.name,
                 feed.feed_type,
                 config_json,
                 feed.enabled as i32,
-                feed.check_interval_minutes.map(|v| v as i64),
                 feed.max_retries.map(|v| v as i32),
                 feed.retry_delay_seconds.map(|v| v as i64),
                 now,
@@ -247,10 +264,10 @@ impl Database {
         .context("Failed to insert feed")?;
 
         // Link publishers
-        for pub_id in &feed.publishers {
+        for binding in &feed.publishers {
             conn.execute(
-                "INSERT OR IGNORE INTO feed_publishers (feed_id, publisher_id) VALUES (?1, ?2)",
-                params![feed.id, pub_id],
+                "INSERT OR IGNORE INTO feed_publishers (feed_id, publisher_id, template) VALUES (?1, ?2, ?3)",
+                params![feed.id, binding.publisher_id, binding.template],
             )?;
         }
 
@@ -267,14 +284,13 @@ impl Database {
         let rows = conn
             .execute(
                 "UPDATE feeds SET name = ?1, feed_type = ?2, config_json = ?3, enabled = ?4, \
-                 check_interval_minutes = ?5, max_retries = ?6, retry_delay_seconds = ?7, updated_at = ?8 \
-                 WHERE id = ?9",
+                 max_retries = ?5, retry_delay_seconds = ?6, updated_at = ?7 \
+                 WHERE id = ?8",
                 params![
                     feed.name,
                     feed.feed_type,
                     config_json,
                     feed.enabled as i32,
-                    feed.check_interval_minutes.map(|v| v as i64),
                     feed.max_retries.map(|v| v as i32),
                     feed.retry_delay_seconds.map(|v| v as i64),
                     now,
@@ -292,10 +308,10 @@ impl Database {
             "DELETE FROM feed_publishers WHERE feed_id = ?1",
             params![id],
         )?;
-        for pub_id in &feed.publishers {
+        for binding in &feed.publishers {
             conn.execute(
-                "INSERT OR IGNORE INTO feed_publishers (feed_id, publisher_id) VALUES (?1, ?2)",
-                params![id, pub_id],
+                "INSERT OR IGNORE INTO feed_publishers (feed_id, publisher_id, template) VALUES (?1, ?2, ?3)",
+                params![id, binding.publisher_id, binding.template],
             )?;
         }
 
@@ -497,6 +513,127 @@ impl Database {
             )
             .context("Failed to cleanup old posts")?;
         Ok(deleted as u64)
+    }
+
+    /// Clean up old publish results (older than `days`).
+    pub async fn cleanup_old_publish_results(&self, days: i64) -> Result<u64> {
+        let conn = self.conn.lock().await;
+        let cutoff = (Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        let deleted = conn
+            .execute(
+                "DELETE FROM publish_results WHERE published_at < ?1",
+                params![cutoff],
+            )
+            .context("Failed to cleanup old publish results")?;
+        Ok(deleted as u64)
+    }
+
+    /// List feed log entries with their publisher results.
+    pub async fn list_feed_logs(&self, limit: i64, offset: i64) -> Result<FeedLogResponse> {
+        let conn = self.conn.lock().await;
+
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM published_posts", [], |row| row.get(0))
+            .context("Failed to count feed logs")?;
+
+        let retention_days: u64 = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'log_retention_days'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT pp.guid, pp.feed_id, pp.title, pp.url, pp.published_at,
+                        pr.publisher_id, pr.success, pr.message
+                 FROM published_posts pp
+                 LEFT JOIN publish_results pr ON pp.guid = pr.guid AND pp.feed_id = pr.feed_id
+                 ORDER BY pp.published_at DESC
+                 LIMIT ?1 OFFSET ?2",
+            )
+            .context("Failed to prepare list_feed_logs")?;
+
+        let rows = stmt
+            .query_map(params![limit, offset], |row| {
+                let guid: String = row.get(0)?;
+                let feed_id: String = row.get(1)?;
+                let title: String = row.get(2)?;
+                let url: String = row.get(3)?;
+                let published_at: String = row.get(4)?;
+                let publisher_id: Option<String> = row.get(5)?;
+                let success: Option<i32> = row.get(6)?;
+                let message: Option<String> = row.get(7)?;
+                Ok((
+                    guid,
+                    feed_id,
+                    title,
+                    url,
+                    published_at,
+                    publisher_id,
+                    success,
+                    message,
+                ))
+            })
+            .context("Failed to query feed logs")?;
+
+        // Group by post, preserving ORDER BY
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        let mut entries: Vec<FeedLogEntry> = Vec::new();
+
+        for row in rows {
+            let (guid, feed_id, title, url, published_at, publisher_id, success, message) = row?;
+
+            if seen.insert(guid.clone()) {
+                entries.push(FeedLogEntry {
+                    guid: guid.clone(),
+                    feed_id: feed_id.clone(),
+                    title: title.clone(),
+                    url: url.clone(),
+                    published_at: published_at.clone(),
+                    publisher_results: Vec::new(),
+                });
+            }
+
+            if let Some(pid) = publisher_id {
+                if let Some(entry) = entries.last_mut() {
+                    entry.publisher_results.push(FeedLogPublisherResult {
+                        publisher_id: pid,
+                        success: success.unwrap_or(0) != 0,
+                        message: message.unwrap_or_default(),
+                    });
+                }
+            }
+        }
+
+        Ok(FeedLogResponse {
+            entries,
+            total: total as u64,
+            retention_days,
+        })
+    }
+
+    /// Get the log retention days setting.
+    pub async fn get_log_retention(&self) -> Result<u64> {
+        Ok(self
+            .get_setting("log_retention_days")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30))
+    }
+
+    /// Set the log retention days setting.
+    pub async fn set_log_retention(&self, days: u64) -> Result<()> {
+        self.set_setting("log_retention_days", &days.to_string())
+            .await
     }
 
     // ───── Feed Cache ─────
@@ -722,7 +859,6 @@ mod tests {
             },
             enabled: true,
             publishers: vec![],
-            check_interval_minutes: Some(30),
             max_retries: Some(3),
             retry_delay_seconds: Some(5),
         };
@@ -752,7 +888,6 @@ mod tests {
             },
             enabled: true,
             publishers: vec![],
-            check_interval_minutes: None,
             max_retries: None,
             retry_delay_seconds: None,
         };
@@ -779,7 +914,6 @@ mod tests {
             },
             enabled: true,
             publishers: vec![],
-            check_interval_minutes: None,
             max_retries: None,
             retry_delay_seconds: None,
         };
@@ -800,7 +934,6 @@ mod tests {
             },
             enabled: true,
             publishers: vec![],
-            check_interval_minutes: None,
             max_retries: None,
             retry_delay_seconds: None,
         };
@@ -819,7 +952,7 @@ mod tests {
             chat_id: "-100".into(),
             parse_mode: Some("HTML".into()),
             message_thread_id: None,
-            template: None,
+            template: "📰 *{{ title }}*".into(),
         };
         db.upsert_publisher("telegram-1", &config, true)
             .await

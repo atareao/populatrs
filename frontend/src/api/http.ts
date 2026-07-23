@@ -4,21 +4,25 @@ export interface User {
   name: string;
 }
 
+export interface FeedPublisherBinding {
+  publisher_id: string;
+  template?: string | null;
+}
+
 export interface FeedConfig {
   id: string;
   type: string;
   config: Record<string, unknown>;
   name: string;
   enabled: boolean;
-  publishers: string[];
-  check_interval_minutes?: number;
+  publishers: FeedPublisherBinding[];
   max_retries?: number;
   retry_delay_seconds?: number;
 }
 
 export interface PublisherConfigEntry {
   type: string;
-  config: Record<string, unknown>;
+  config: Record<string, unknown> & { template?: string };
   enabled: boolean;
 }
 
@@ -145,6 +149,40 @@ export async function oauthCallback(id: string, code: string, state: string): Pr
     method: "POST",
     body: { code, state },
   });
+}
+
+// Logs
+export interface FeedLogPublisherResult {
+  publisher_id: string;
+  success: boolean;
+  message: string;
+}
+
+export interface FeedLogEntry {
+  guid: string;
+  feed_id: string;
+  title: string;
+  url: string;
+  published_at: string;
+  publisher_results: FeedLogPublisherResult[];
+}
+
+export interface FeedLogResponse {
+  entries: FeedLogEntry[];
+  total: number;
+  retention_days: number;
+}
+
+export async function fetchFeedLogs(limit = 50, offset = 0): Promise<FeedLogResponse> {
+  return fetcher(`/api/logs/history?limit=${limit}&offset=${offset}`);
+}
+
+export async function fetchLogRetention(): Promise<{ retention_days: number }> {
+  return fetcher("/api/logs/retention");
+}
+
+export async function updateLogRetention(days: number): Promise<{ status: string; retention_days: number }> {
+  return fetcher("/api/logs/retention", { method: "PUT", body: { retention_days: days } });
 }
 
 // Status

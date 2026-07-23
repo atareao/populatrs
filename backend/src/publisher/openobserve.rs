@@ -41,7 +41,10 @@ impl OpenObservePublisher {
 
 #[async_trait]
 impl Publisher for OpenObservePublisher {
-    async fn publish(&self, post: &Post) -> Result<String> {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
         let url = format!(
             "{}/api/{}/{}/_json",
             self.url, self.organization, self.stream_name
@@ -53,7 +56,7 @@ impl Publisher for OpenObservePublisher {
             url: post.url.clone(),
         };
 
-        let formatted_message = self.renderer.render(&self.template, &context)?;
+        let formatted_message = self.renderer.render(template_str, &context)?;
 
         let log_entry = json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),

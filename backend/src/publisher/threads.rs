@@ -31,7 +31,10 @@ impl ThreadsPublisher {
 
 #[async_trait]
 impl Publisher for ThreadsPublisher {
-    async fn publish(&self, post: &Post) -> Result<String> {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
         // Threads API uses a two-step process: create container, then publish
 
         // Step 1: Create media container
@@ -43,7 +46,7 @@ impl Publisher for ThreadsPublisher {
             url: post.url.clone(),
         };
 
-        let text = self.renderer.render(&self.template, &context)?;
+        let text = self.renderer.render(template_str, &context)?;
 
         // Threads has a character limit of 500
         let text = if text.len() > 500 {

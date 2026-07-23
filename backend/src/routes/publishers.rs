@@ -145,7 +145,7 @@ pub async fn test_publisher(
         "test".to_string(),
     );
 
-    match publisher.publish(&test_post).await {
+    match publisher.publish(&test_post, None).await {
         Ok(msg) => (
             StatusCode::OK,
             Json(json!({"status": "ok", "message": msg})),

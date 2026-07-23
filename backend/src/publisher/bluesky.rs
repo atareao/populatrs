@@ -95,7 +95,10 @@ impl BlueskyPublisher {
 
 #[async_trait]
 impl Publisher for BlueskyPublisher {
-    async fn publish(&self, post: &Post) -> Result<String> {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
         // Authenticate first and get both access token and DID
         let (access_token, did) = self.authenticate().await?;
 
@@ -107,7 +110,7 @@ impl Publisher for BlueskyPublisher {
             url: post.url.clone(),
         };
 
-        let text = self.renderer.render(&self.template, &context)?;
+        let text = self.renderer.render(template_str, &context)?;
 
         // Bluesky has a character limit of 300
         let text = if text.len() > 300 {
