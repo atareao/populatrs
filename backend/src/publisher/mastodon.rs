@@ -30,7 +30,10 @@ impl MastodonPublisher {
 
 #[async_trait]
 impl Publisher for MastodonPublisher {
-    async fn publish(&self, post: &Post) -> Result<String> {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
         let url = format!("{}/api/v1/statuses", self.server_url);
 
         let context = TemplateContext {
@@ -39,7 +42,7 @@ impl Publisher for MastodonPublisher {
             url: post.url.clone(),
         };
 
-        let status = self.renderer.render(&self.template, &context)?;
+        let status = self.renderer.render(template_str, &context)?;
 
         let payload = json!({
             "status": status,

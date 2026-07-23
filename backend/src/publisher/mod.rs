@@ -27,7 +27,9 @@ pub use x::XPublisher;
 
 #[async_trait]
 pub trait Publisher: Send + Sync {
-    async fn publish(&self, post: &Post) -> Result<String>;
+    /// Publish a post. If `feed_template` is provided and non-empty, it
+    /// overrides the publisher's default template for this publication.
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String>;
     fn get_type(&self) -> &'static str;
     fn get_id(&self) -> &str;
     fn as_any(&self) -> &dyn Any;
@@ -49,19 +51,14 @@ pub fn create_publisher_with_config_path(
             parse_mode,
             message_thread_id,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("telegram"));
-            Ok(Box::new(TelegramPublisher::new(
-                id,
-                bot_token.clone(),
-                chat_id.clone(),
-                parse_mode.clone(),
-                message_thread_id.clone(),
-                template_str,
-            )))
-        }
+        } => Ok(Box::new(TelegramPublisher::new(
+            id,
+            bot_token.clone(),
+            chat_id.clone(),
+            parse_mode.clone(),
+            message_thread_id.clone(),
+            template.clone(),
+        ))),
         PublisherConfig::X {
             client_id,
             client_secret,
@@ -69,36 +66,26 @@ pub fn create_publisher_with_config_path(
             refresh_token,
             redirect_uri,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("x"));
-            Ok(Box::new(XPublisher::new(
-                id,
-                client_id.clone(),
-                client_secret.clone(),
-                access_token.clone(),
-                refresh_token.clone(),
-                redirect_uri.clone(),
-                template_str,
-                config_path,
-            )))
-        }
+        } => Ok(Box::new(XPublisher::new(
+            id,
+            client_id.clone(),
+            client_secret.clone(),
+            access_token.clone(),
+            refresh_token.clone(),
+            redirect_uri.clone(),
+            template.clone(),
+            config_path,
+        ))),
         PublisherConfig::Mastodon {
             server_url,
             access_token,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("mastodon"));
-            Ok(Box::new(MastodonPublisher::new(
-                id,
-                server_url.clone(),
-                access_token.clone(),
-                template_str,
-            )))
-        }
+        } => Ok(Box::new(MastodonPublisher::new(
+            id,
+            server_url.clone(),
+            access_token.clone(),
+            template.clone(),
+        ))),
         PublisherConfig::LinkedIn {
             client_id,
             client_secret,
@@ -107,103 +94,73 @@ pub fn create_publisher_with_config_path(
             user_id,
             redirect_uri,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("linkedin"));
-            Ok(Box::new(LinkedInPublisher::new(
-                id,
-                client_id.clone(),
-                client_secret.clone(),
-                access_token.clone(),
-                refresh_token.clone(),
-                user_id.clone(),
-                redirect_uri.clone(),
-                template_str,
-                config_path,
-            )))
-        }
+        } => Ok(Box::new(LinkedInPublisher::new(
+            id,
+            client_id.clone(),
+            client_secret.clone(),
+            access_token.clone(),
+            refresh_token.clone(),
+            user_id.clone(),
+            redirect_uri.clone(),
+            template.clone(),
+            config_path,
+        ))),
         PublisherConfig::OpenObserve {
             url,
             organization,
             stream_name,
             access_token,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("openobserve"));
-            Ok(Box::new(OpenObservePublisher::new(
-                id,
-                url.clone(),
-                organization.clone(),
-                stream_name.clone(),
-                access_token.clone(),
-                template_str,
-            )))
-        }
+        } => Ok(Box::new(OpenObservePublisher::new(
+            id,
+            url.clone(),
+            organization.clone(),
+            stream_name.clone(),
+            access_token.clone(),
+            template.clone(),
+        ))),
         PublisherConfig::Matrix {
             homeserver_url,
             access_token,
             room_id,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("matrix"));
-            Ok(Box::new(MatrixPublisher::new(
-                id,
-                homeserver_url.clone(),
-                access_token.clone(),
-                room_id.clone(),
-                template_str,
-            )))
-        }
+        } => Ok(Box::new(MatrixPublisher::new(
+            id,
+            homeserver_url.clone(),
+            access_token.clone(),
+            room_id.clone(),
+            template.clone(),
+        ))),
         PublisherConfig::Bluesky {
             handle,
             password,
             pds_url,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("bluesky"));
-            Ok(Box::new(BlueskyPublisher::new(
-                id,
-                handle.clone(),
-                password.clone(),
-                pds_url.clone(),
-                template_str,
-            )))
-        }
+        } => Ok(Box::new(BlueskyPublisher::new(
+            id,
+            handle.clone(),
+            password.clone(),
+            pds_url.clone(),
+            template.clone(),
+        ))),
         PublisherConfig::Threads {
             access_token,
             user_id,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("threads"));
-            Ok(Box::new(ThreadsPublisher::new(
-                id,
-                access_token.clone(),
-                user_id.clone(),
-                template_str,
-            )))
-        }
+        } => Ok(Box::new(ThreadsPublisher::new(
+            id,
+            access_token.clone(),
+            user_id.clone(),
+            template.clone(),
+        ))),
         PublisherConfig::Discord {
             webhook_url,
             template,
-        } => {
-            let template_str = template
-                .clone()
-                .unwrap_or_else(|| get_default_template("discord"));
-            Ok(Box::new(DiscordPublisher::new(
-                id,
-                webhook_url.clone(),
-                template_str,
-            )))
-        }
+        } => Ok(Box::new(DiscordPublisher::new(
+            id,
+            webhook_url.clone(),
+            template.clone(),
+        ))),
     }
 }
 
@@ -254,15 +211,19 @@ impl PublisherManager {
         Ok(())
     }
 
+    /// Publish a post to all given publisher IDs, optionally using
+    /// feed-specific templates (publisher_id → template override).
     pub async fn publish_to_all(
         &self,
         post: &Post,
         publisher_ids: &[String],
+        feed_templates: &HashMap<String, String>,
     ) -> Vec<Result<String>> {
         let mut results = Vec::new();
         for id in publisher_ids {
             if let Some(publisher) = self.publishers.get(id) {
-                results.push(publisher.publish(post).await);
+                let feed_template = feed_templates.get(id).map(|s| s.as_str());
+                results.push(publisher.publish(post, feed_template).await);
             } else {
                 results.push(Err(anyhow::anyhow!("Publisher not found: {}", id)));
             }

@@ -41,7 +41,10 @@ impl TelegramPublisher {
 
 #[async_trait]
 impl Publisher for TelegramPublisher {
-    async fn publish(&self, post: &Post) -> Result<String> {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
 
         let context = TemplateContext {
@@ -50,7 +53,7 @@ impl Publisher for TelegramPublisher {
             url: post.url.clone(),
         };
 
-        let message = self.renderer.render(&self.template, &context)?;
+        let message = self.renderer.render(template_str, &context)?;
 
         // Validate message length (Telegram max is 4096 characters)
         if message.len() > 4096 {

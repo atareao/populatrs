@@ -164,7 +164,7 @@ pub async fn set_retention(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     let days = match body.get("retention_days").and_then(|v| v.as_u64()) {
-        Some(d) if d >= 1 && d <= 365 => d,
+        Some(d) if (1..=365).contains(&d) => d,
         _ => {
             return (
                 StatusCode::BAD_REQUEST,

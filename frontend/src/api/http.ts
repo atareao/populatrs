@@ -4,21 +4,25 @@ export interface User {
   name: string;
 }
 
+export interface FeedPublisherBinding {
+  publisher_id: string;
+  template?: string | null;
+}
+
 export interface FeedConfig {
   id: string;
   type: string;
   config: Record<string, unknown>;
   name: string;
   enabled: boolean;
-  publishers: string[];
-  check_interval_minutes?: number;
+  publishers: FeedPublisherBinding[];
   max_retries?: number;
   retry_delay_seconds?: number;
 }
 
 export interface PublisherConfigEntry {
   type: string;
-  config: Record<string, unknown>;
+  config: Record<string, unknown> & { template?: string };
   enabled: boolean;
 }
 
