@@ -10,6 +10,14 @@ use tokio::sync::Mutex;
 use url::Url;
 use uuid::Uuid;
 
+/// Publicador para LinkedIn usando 3-legged OAuth (Authorization Code Flow).
+///
+/// El usuario autoriza la aplicación una vez mediante un popup OAuth.
+/// Los tokens se almacenan en la base de datos y se renuevan automáticamente.
+///
+/// Scopes usados:
+/// - `w_member_social` — Publicar posts en nombre del usuario
+/// - `openid profile email` — Obtener perfil via OpenID Connect (/v2/userinfo)
 pub struct LinkedInPublisher {
     pub id: String,
     pub client_id: String,
@@ -55,6 +63,8 @@ impl LinkedInPublisher {
     }
 
     /// Genera la URL de autorización OAuth 2.0 para LinkedIn
+    ///
+    /// Scopes: `w_member_social` para publicar, `openid profile email` para perfil
     pub fn generate_auth_url(&self, state: Option<String>) -> String {
         let state = state.unwrap_or_else(|| Uuid::new_v4().to_string());
         let scope = "w_member_social openid profile email";
@@ -71,6 +81,9 @@ impl LinkedInPublisher {
     }
 
     /// Intercambia el código de autorización por access_token y refresh_token
+    ///
+    /// Sigue el paso 3 de la documentación de Microsoft:
+    /// POST /oauth/v2/accessToken con grant_type=authorization_code
     pub async fn exchange_code_for_tokens(
         &self,
         code: &str,
@@ -242,90 +255,133 @@ impl LinkedInPublisher {
         Ok(())
     }
 
-    /// Comando para setup interactivo de OAuth
-    pub async fn oauth_setup(&self) -> Result<()> {
-        println!("\n🔗 LinkedIn OAuth 2.0 Setup");
-        println!("===========================");
+    /// Obtiene el perfil del usuario autenticado usando OpenID Connect (/v2/userinfo)
+    ///
+    /// El campo `sub` puede venir en dos formatos:
+    /// - ID simple: `"ACoAABBsdfg"` → se devuelve `"urn:li:person:ACoAABBsdfg"`
+    /// - URN completo: `"urn:li:person:ACoAABBsdfg"` → se devuelve tal cual
+    pub async fn get_user_profile(&self, access_token: &str) -> Result<String> {
+        let profile_url = "https://api.linkedin.com/v2/userinfo";
 
-        let auth_url = self.generate_auth_url(None);
-        println!("\n1. Abre esta URL en tu navegador:");
-        println!("{}", auth_url);
-
-        println!("\n2. Autoriza la aplicación y copia el código de la URL de retorno");
-        println!("3. Pega el código aquí:");
-
-        let mut code = String::new();
-        std::io::stdin().read_line(&mut code)?;
-        let code = code.trim();
-
-        if code.is_empty() {
-            return Err(anyhow::anyhow!("Código no proporcionado"));
-        }
-
-        let (access_token, refresh_token, expires_in) = self.exchange_code_for_tokens(code).await?;
-
-        println!("\n✅ Tokens obtenidos exitosamente!");
-        println!("Access Token: {}", access_token);
-        println!("Expira en: {} segundos", expires_in);
-
-        if let Some(rt) = &refresh_token {
-            println!("Refresh Token: {}", rt);
-        }
-
-        // Guardar en configuración
-        self.save_tokens_to_config(&access_token, refresh_token.as_deref())
+        let response = self
+            .client
+            .get(profile_url)
+            .bearer_auth(access_token)
+            .send()
             .await?;
-        println!("\n💾 Tokens guardados en configuración");
 
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Publisher for LinkedInPublisher {
-    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
-        let template_str = feed_template
-            .filter(|t| !t.is_empty())
-            .unwrap_or(&self.template);
-        let url = "https://api.linkedin.com/v2/ugcPosts";
-
-        let context = TemplateContext {
-            title: post.title.clone(),
-            description: post.description.clone().unwrap_or_default(),
-            url: post.url.clone(),
-        };
-
-        let commentary = self.renderer.render(template_str, &context)?;
-
-        tracing::info!("Attempting to publish to LinkedIn: '{}'", commentary);
-
-        // Obtener access token válido (renovándolo si es necesario)
-        let access_token = match self.get_valid_access_token().await {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to get valid LinkedIn access token: {}", e);
-                return Err(e);
-            }
-        };
-
-        // Determinar el author URN
-        let author_urn = if let Some(user_id) = &self.user_id {
-            // Si tenemos user_id, detectar si es un número (organization) o string (user)
-            if user_id.chars().all(|c| c.is_ascii_digit()) {
-                format!("urn:li:organization:{}", user_id)
+        if response.status().is_success() {
+            let profile: Value = response.json().await?;
+            // OpenID Connect: el campo 'sub' es el identificador único
+            if let Some(sub) = profile.get("sub").and_then(|v| v.as_str()) {
+                tracing::info!("LinkedIn userinfo sub: {}", sub);
+                // Si ya viene como URN completo, usarlo directamente
+                if sub.starts_with("urn:li:") {
+                    Ok(sub.to_string())
+                } else {
+                    Ok(format!("urn:li:person:{}", sub))
+                }
             } else {
-                format!("urn:li:person:{}", user_id)
+                Err(anyhow::anyhow!(
+                    "Could not get user sub from LinkedIn userinfo endpoint. Response: {}",
+                    profile
+                ))
             }
         } else {
-            // Si no hay user_id, necesitamos obtener el perfil del usuario autenticado
-            match self.get_user_profile(&access_token).await {
-                Ok(profile_urn) => profile_urn,
-                Err(e) => {
-                    tracing::error!("Failed to get LinkedIn user profile: {}", e);
-                    return Err(e);
+            let error_body = response.text().await.unwrap_or_default();
+            Err(anyhow::anyhow!(
+                "Failed to get LinkedIn profile: {}",
+                error_body
+            ))
+        }
+    }
+
+    /// Publica un post usando la nueva Posts API de LinkedIn (/rest/posts)
+    ///
+    /// La API legacy `/v2/ugcPosts` está deprecada. La nueva API usa:
+    /// - URL: `https://api.linkedin.com/rest/posts`
+    /// - Header: `LinkedIn-Version: YYYYMM`
+    /// - Formato de payload diferente
+    async fn publish_rest_posts_api(
+        &self,
+        access_token: &str,
+        author_urn: &str,
+        commentary: &str,
+        post: &Post,
+    ) -> Result<String> {
+        let posts_url = "https://api.linkedin.com/rest/posts";
+
+        let payload = json!({
+            "author": author_urn,
+            "commentary": commentary,
+            "visibility": "PUBLIC",
+            "distribution": {
+                "feedDistribution": "MAIN_FEED",
+                "targetEntities": [],
+                "thirdPartyDistributionChannels": []
+            },
+            "content": {
+                "article": {
+                    "source": post.url,
+                    "title": post.title,
+                    "description": post.description.as_deref().unwrap_or("")
                 }
-            }
-        };
+            },
+            "lifecycleState": "PUBLISHED",
+            "isReshareDisabledByAuthor": false
+        });
+
+        tracing::debug!(
+            "LinkedIn Posts API payload: {}",
+            serde_json::to_string_pretty(&payload)?
+        );
+
+        let response = self
+            .client
+            .post(posts_url)
+            .bearer_auth(access_token)
+            .header("LinkedIn-Version", "202501")
+            .header("X-Restli-Protocol-Version", "2.0.0")
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if status.is_success() {
+            let result: Value = response.json().await?;
+            let post_id = result
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            tracing::info!(
+                "Successfully published to LinkedIn (Posts API): {}",
+                post_id
+            );
+            Ok(format!("Published to LinkedIn: {}", post_id))
+        } else {
+            let error_body = response.text().await.unwrap_or_default();
+            tracing::error!("LinkedIn Posts API error: {} - {}", status, error_body);
+            Err(anyhow::anyhow!(
+                "Failed to publish to LinkedIn (Posts API): {} - {}",
+                status,
+                error_body
+            ))
+        }
+    }
+
+    /// Publica un post usando la API legacy UGC (/v2/ugcPosts)
+    ///
+    /// Esta API está deprecada pero sigue funcionando para apps existentes.
+    async fn publish_ugc_api(
+        &self,
+        access_token: &str,
+        author_urn: &str,
+        commentary: &str,
+        post: &Post,
+    ) -> Result<String> {
+        let ugc_url = "https://api.linkedin.com/v2/ugcPosts";
 
         let payload = json!({
             "author": author_urn,
@@ -354,102 +410,209 @@ impl Publisher for LinkedInPublisher {
         });
 
         tracing::debug!(
-            "LinkedIn payload: {}",
+            "LinkedIn UGC API payload: {}",
             serde_json::to_string_pretty(&payload)?
         );
 
         let response = self
             .client
-            .post(url)
-            .bearer_auth(&access_token)
+            .post(ugc_url)
+            .bearer_auth(access_token)
             .header("X-Restli-Protocol-Version", "2.0.0")
             .header("Content-Type", "application/json")
-            .header("Access-Control-Allow-Origin", "*")
             .json(&payload)
             .send()
             .await?;
 
         let status = response.status();
-        tracing::info!("LinkedIn API response status: {}", status);
 
         if status.is_success() {
             let result: Value = response.json().await?;
             let post_id = result["id"].as_str().unwrap_or("unknown");
+            tracing::info!("Successfully published to LinkedIn (UGC API): {}", post_id);
             Ok(format!("Published to LinkedIn: {}", post_id))
         } else {
             let error_body = response.text().await.unwrap_or_default();
-            tracing::error!("LinkedIn API Error Response: {}", error_body);
+            tracing::error!("LinkedIn UGC API error: {} - {}", status, error_body);
 
-            // Si el error es de autenticación, intentar renovar token
+            // Si el error es 403 con ACCESS_DENIED en /author, probablemente
+            // el sub de OpenID Connect no es el person_id legacy. Intentar
+            // con la nueva Posts API.
+            if status.as_u16() == 403 && error_body.contains("/author") {
+                tracing::info!("UGC API failed on /author field, trying Posts API as fallback...");
+                return Err(anyhow::anyhow!("UGC_API_AUTHOR_ERROR:{}", error_body));
+            }
+
+            // Si el error es de autenticación, devolver error específico
             if status.as_u16() == 401 {
-                tracing::info!("LinkedIn access token expired, attempting to refresh...");
+                return Err(anyhow::anyhow!("TOKEN_EXPIRED:{}", error_body));
+            }
 
-                match self.refresh_access_token().await {
-                    Ok((new_access_token, new_refresh_token)) => {
-                        // Guardar tokens actualizados
-                        if let Err(e) = self
-                            .save_tokens_to_config(&new_access_token, new_refresh_token.as_deref())
-                            .await
-                        {
-                            tracing::warn!("Failed to save refreshed LinkedIn tokens: {}", e);
-                        }
+            Err(anyhow::anyhow!(
+                "Failed to publish to LinkedIn: {} - {}",
+                status,
+                error_body
+            ))
+        }
+    }
+}
 
-                        // Reintentar publicación con nuevo token
-                        let retry_response = self
-                            .client
-                            .post(url)
-                            .bearer_auth(&new_access_token)
-                            .header("X-Restli-Protocol-Version", "2.0.0")
-                            .header("Content-Type", "application/json")
-                            .header("Access-Control-Allow-Origin", "*")
-                            .json(&payload)
-                            .send()
-                            .await?;
+#[async_trait]
+impl Publisher for LinkedInPublisher {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
 
-                        let retry_status = retry_response.status();
-                        tracing::info!("LinkedIn API retry response status: {}", retry_status);
+        let context = TemplateContext {
+            title: post.title.clone(),
+            description: post.description.clone().unwrap_or_default(),
+            url: post.url.clone(),
+        };
 
-                        if retry_status.is_success() {
-                            let result: Value = retry_response.json().await?;
-                            let post_id = result["id"].as_str().unwrap_or("unknown");
-                            Ok(format!(
-                                "Published to LinkedIn (after token refresh): {}",
-                                post_id
-                            ))
-                        } else {
-                            let error_body = retry_response.text().await.unwrap_or_default();
-                            tracing::error!("LinkedIn API retry failed: {}", error_body);
-                            Err(anyhow::anyhow!(
-                                "Failed to publish to LinkedIn after token refresh: {} - {}",
-                                retry_status,
-                                error_body
-                            ))
-                        }
-                    }
-                    Err(refresh_error) => {
-                        tracing::error!("Failed to refresh LinkedIn token: {}", refresh_error);
-                        Err(anyhow::anyhow!(
-                            "Failed to publish to LinkedIn - token refresh failed: {}",
-                            refresh_error
-                        ))
-                    }
-                }
+        let commentary = self.renderer.render(template_str, &context)?;
+
+        // Normalizar: si la plantilla tiene \n literales (barra+ene),
+        // convertirlos a saltos de línea reales. Esto pasa cuando el
+        // template se guarda desde el formulario web y los \n se almacenan
+        // como texto literal en la BD.
+        let commentary = commentary.replace("\\n", "\n");
+
+        tracing::info!("Attempting to publish to LinkedIn: '{}'", commentary);
+
+        // Obtener access token válido (renovándolo si es necesario)
+        let access_token = match self.get_valid_access_token().await {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to get valid LinkedIn access token: {}", e);
+                return Err(e);
+            }
+        };
+
+        // Determinar el author URN
+        let author_urn = if let Some(user_id) = &self.user_id {
+            // Si el user_id ya es un URN completo, usarlo directamente
+            if user_id.starts_with("urn:li:") {
+                user_id.clone()
             } else {
-                // Parse error para mejor diagnóstico
-                if let Ok(error_json) = serde_json::from_str::<Value>(&error_body) {
-                    if let Some(message) = error_json.get("message") {
-                        tracing::error!("LinkedIn API Error Message: {}", message);
-                    }
-                    if let Some(service_error_code) = error_json.get("serviceErrorCode") {
-                        tracing::error!("LinkedIn API Service Error Code: {}", service_error_code);
+                format!("urn:li:person:{}", user_id)
+            }
+        } else {
+            // Si no hay user_id, obtener el perfil del usuario autenticado
+            match self.get_user_profile(&access_token).await {
+                Ok(profile_urn) => profile_urn,
+                Err(e) => {
+                    tracing::error!("Failed to get LinkedIn user profile: {}", e);
+                    return Err(e);
+                }
+            }
+        };
+
+        tracing::info!("LinkedIn author URN: {}", author_urn);
+
+        // ── Estrategia de publicación ──
+        // 1. Intentar primero con la API legacy UGC (/v2/ugcPosts)
+        // 2. Si falla con error de /author, probar con la nueva Posts API (/rest/posts)
+        // 3. Si falla con 401, refrescar el token y reintentar
+
+        let ugc_result = self
+            .publish_ugc_api(&access_token, &author_urn, &commentary, post)
+            .await;
+
+        match ugc_result {
+            Ok(msg) => return Ok(msg),
+            Err(e) => {
+                let err_msg = e.to_string();
+
+                // Si el error de UGC API es por /author, probar Posts API
+                if err_msg.starts_with("UGC_API_AUTHOR_ERROR:") {
+                    tracing::info!("UGC API author field failed, falling back to Posts API...");
+
+                    // Guardar el error_body para diagnóstico
+                    let error_body = err_msg.strip_prefix("UGC_API_AUTHOR_ERROR:").unwrap_or("");
+
+                    // Intentar con la nueva Posts API
+                    let posts_result = self
+                        .publish_rest_posts_api(&access_token, &author_urn, &commentary, post)
+                        .await;
+
+                    match posts_result {
+                        Ok(msg) => return Ok(msg),
+                        Err(posts_e) => {
+                            // Si ambos fallan, dar un mensaje claro con diagnóstico
+                            return Err(anyhow::anyhow!(
+                                "LinkedIn publication failed. UGC API error: {} | Posts API error: {}. \
+                                 This usually means the LinkedIn app needs the 'Share on LinkedIn' product \
+                                 or the app is in Developer mode (needs to be Live). \
+                                 Check: https://www.linkedin.com/developers/apps",
+                                error_body,
+                                posts_e
+                            ));
+                        }
                     }
                 }
 
-                Err(anyhow::anyhow!(
-                    "Failed to publish to LinkedIn: {} - {}",
-                    status,
-                    error_body
-                ))
+                // Si el error es de token expirado, refrescar y reintentar
+                if err_msg.starts_with("TOKEN_EXPIRED:") {
+                    tracing::info!("LinkedIn access token expired, attempting to refresh...");
+
+                    match self.refresh_access_token().await {
+                        Ok((new_access_token, new_refresh_token)) => {
+                            // Guardar tokens actualizados
+                            if let Err(save_err) = self
+                                .save_tokens_to_config(
+                                    &new_access_token,
+                                    new_refresh_token.as_deref(),
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    "Failed to save refreshed LinkedIn tokens: {}",
+                                    save_err
+                                );
+                            }
+
+                            // Reintentar publicación con nuevo token
+                            // Primero UGC API
+                            let retry_ugc = self
+                                .publish_ugc_api(&new_access_token, &author_urn, &commentary, post)
+                                .await;
+
+                            match retry_ugc {
+                                Ok(msg) => return Ok(format!("{} (after token refresh)", msg)),
+                                Err(retry_e) => {
+                                    let retry_msg = retry_e.to_string();
+                                    if retry_msg.starts_with("UGC_API_AUTHOR_ERROR:") {
+                                        // Fallback a Posts API
+                                        return self
+                                            .publish_rest_posts_api(
+                                                &new_access_token,
+                                                &author_urn,
+                                                &commentary,
+                                                post,
+                                            )
+                                            .await
+                                            .map(|msg| format!("{} (after token refresh)", msg));
+                                    }
+                                    return Err(anyhow::anyhow!(
+                                        "Failed to publish to LinkedIn after token refresh: {}",
+                                        retry_msg
+                                    ));
+                                }
+                            }
+                        }
+                        Err(refresh_error) => {
+                            tracing::error!("Failed to refresh LinkedIn token: {}", refresh_error);
+                            return Err(anyhow::anyhow!(
+                                "Failed to publish to LinkedIn - token refresh failed: {}",
+                                refresh_error
+                            ));
+                        }
+                    }
+                }
+
+                // Otros errores
+                return Err(e);
             }
         }
     }
@@ -467,34 +630,96 @@ impl Publisher for LinkedInPublisher {
     }
 }
 
-impl LinkedInPublisher {
-    /// Obtiene el perfil del usuario autenticado para determinar el URN
-    async fn get_user_profile(&self, access_token: &str) -> Result<String> {
-        let profile_url = "https://api.linkedin.com/v2/people/~:(id)";
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Post;
+    use chrono::Utc;
 
-        let response = self
-            .client
-            .get(profile_url)
-            .bearer_auth(access_token)
-            .header("X-Restli-Protocol-Version", "2.0.0")
-            .send()
-            .await?;
+    fn make_publisher() -> LinkedInPublisher {
+        LinkedInPublisher::new(
+            "test-linkedin".to_string(),
+            "test_client_id".to_string(),
+            "test_client_secret".to_string(),
+            None,
+            None,
+            None,
+            None,
+            "{{ title }} - {{ url }}".to_string(),
+            None,
+        )
+    }
 
-        if response.status().is_success() {
-            let profile: Value = response.json().await?;
-            if let Some(id) = profile.get("id").and_then(|v| v.as_str()) {
-                Ok(format!("urn:li:person:{}", id))
-            } else {
-                Err(anyhow::anyhow!(
-                    "Could not get user ID from LinkedIn profile"
-                ))
-            }
-        } else {
-            let error_body = response.text().await.unwrap_or_default();
-            Err(anyhow::anyhow!(
-                "Failed to get LinkedIn profile: {}",
-                error_body
-            ))
-        }
+    fn make_post() -> Post {
+        Post::new(
+            "test-guid".to_string(),
+            "Test Title".to_string(),
+            Some("Test description".to_string()),
+            "https://example.com/test".to_string(),
+            Utc::now(),
+            "test-feed".to_string(),
+        )
+    }
+
+    #[test]
+    fn test_new_publisher() {
+        let publisher = make_publisher();
+        assert_eq!(publisher.get_id(), "test-linkedin");
+        assert_eq!(publisher.get_type(), "linkedin");
+        assert!(publisher.user_id.is_none());
+        assert_eq!(publisher.redirect_uri, "https://127.0.0.1");
+    }
+
+    #[test]
+    fn test_new_publisher_with_user_id() {
+        let publisher = LinkedInPublisher::new(
+            "test-user".to_string(),
+            "client_id".to_string(),
+            "client_secret".to_string(),
+            None,
+            None,
+            Some("user-123".to_string()),
+            Some("https://example.com/callback".to_string()),
+            "{{ title }}".to_string(),
+            None,
+        );
+        assert_eq!(publisher.user_id.as_deref(), Some("user-123"));
+        assert_eq!(publisher.redirect_uri, "https://example.com/callback");
+    }
+
+    #[test]
+    fn test_generate_auth_url() {
+        let publisher = make_publisher();
+        let url = publisher.generate_auth_url(Some("test-state".to_string()));
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains("client_id=test_client_id"));
+        assert!(url.contains("state=test-state"));
+        assert!(url.contains("scope=w_member_social+openid+profile+email"));
+        assert!(url.contains("redirect_uri="));
+    }
+
+    #[test]
+    fn test_template_rendering() {
+        let publisher = make_publisher();
+        let post = make_post();
+
+        let context = TemplateContext {
+            title: post.title.clone(),
+            description: post.description.clone().unwrap_or_default(),
+            url: post.url.clone(),
+        };
+
+        let result = publisher
+            .renderer
+            .render("{{ title }} - {{ url }}", &context);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Test Title - https://example.com/test");
+    }
+
+    #[test]
+    fn test_get_type_and_id() {
+        let publisher = make_publisher();
+        assert_eq!(publisher.get_type(), "linkedin");
+        assert_eq!(publisher.get_id(), "test-linkedin");
     }
 }

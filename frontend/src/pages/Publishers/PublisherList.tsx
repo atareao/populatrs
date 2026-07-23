@@ -127,12 +127,8 @@ export default function PublisherList() {
   const handleOAuth = async (id: string, type: string) => {
     try {
       const { url } = await getOAuthUrl(id);
-      const origin = window.location.origin;
-      const callbackUrl = `${origin}/oauth/callback?publisher_id=${id}`;
-      const authUrl = new URL(url);
-      authUrl.searchParams.set("redirect_uri", callbackUrl);
       const popup = window.open(
-        authUrl.toString(),
+        url,
         `oauth-${type}`,
         "width=800,height=700,scrollbars=yes",
       );
@@ -143,6 +139,22 @@ export default function PublisherList() {
       message.error(`Failed to start OAuth: ${e instanceof Error ? e.message : "Unknown error"}`);
     }
   };
+
+  // Listen for OAuth popup messages (backend sends postMessage on success/error)
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === "oauth-success" || event.data?.type === "oauth-error") {
+        loadData();
+        if (event.data.type === "oauth-success") {
+          message.success("OAuth completed successfully!");
+        } else {
+          message.error("OAuth failed");
+        }
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
 
   const handleSubmit = async () => {
     try {

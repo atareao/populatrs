@@ -31,3 +31,6 @@ frontend/dist/
 # Environment
 .env
 .env.local
+
+# AI/Editor
+.opencode/
