@@ -1,4 +1,20 @@
 # Changelog
+## [0.3.2] - 2026-07-23
+
+### Features
+
+- *(publishers)* Test, delete, edit fix and enabled toggle for publishers (#7)
+- Add feed publication history with configurable retention (#9)
+- Per-feed template overrides and publisher template refactor
+
+### Other
+
+- 0.4.0
+## [0.3.1] - 2026-07-21
+
+### Miscellaneous Tasks
+
+- Release v0.3.1
 ## [0.3.0] - 2026-07-21
 
 ### Features
