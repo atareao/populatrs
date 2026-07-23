@@ -1,4 +1,15 @@
 # Changelog
+## [0.3.3] - 2026-07-23
+
+### Bug Fixes
+
+- LinkedIn OAuth redirect_uri must match backend URL exactly
+- *(linkedin)* Normalize newlines and fix user_id in OAuth callback
+- *(linkedin)* Normalize newlines and fix user_id in OAuth callback
+
+### Miscellaneous Tasks
+
+- Release v0.3.3
 ## [0.3.2] - 2026-07-23
 
 ### Features
@@ -6,6 +17,10 @@
 - *(publishers)* Test, delete, edit fix and enabled toggle for publishers (#7)
 - Add feed publication history with configurable retention (#9)
 - Per-feed template overrides and publisher template refactor
+
+### Miscellaneous Tasks
+
+- Release v0.3.2
 
 ### Other
 
