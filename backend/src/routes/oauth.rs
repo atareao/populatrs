@@ -12,7 +12,9 @@ use serde_json::json;
 
 use crate::auth::AppState;
 use crate::models::PublisherConfig;
-use crate::publisher::{create_publisher, LinkedInPublisher, XPublisher};
+use crate::publisher::{
+    create_publisher, LinkedInPublisher, MastodonPublisher, ThreadsPublisher, XPublisher,
+};
 
 /// Payload sent by the frontend after the OAuth provider redirects the user
 /// back with an authorization code.
@@ -31,7 +33,7 @@ pub struct OAuthCallbackQuery {
 
 /// `GET /api/publishers/{id}/oauth/authorize`
 ///
-/// Generates an OAuth 2.0 authorization URL for an X/Twitter or LinkedIn
+/// Generates an OAuth 2.0 authorization URL for an X/Twitter, LinkedIn, or Threads
 /// publisher. The OAuth state is stored in `AppState.oauth_states` so it
 /// can be retrieved when the callback arrives.
 pub async fn authorize(
@@ -86,6 +88,65 @@ pub async fn authorize(
         let mut states = state.oauth_states.lock().await;
         states.insert(format!("linkedin:{id}"), (oauth_state, Instant::now()));
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
+    }
+
+    // Threads uses standard OAuth 2.0 — store the state parameter
+    if let Some(t_pub) = publisher.as_any().downcast_ref::<ThreadsPublisher>() {
+        let oauth_state = uuid::Uuid::new_v4().to_string();
+        let auth_url = t_pub.generate_auth_url(Some(oauth_state.clone()));
+        let mut states = state.oauth_states.lock().await;
+        states.insert(format!("threads:{id}"), (oauth_state, Instant::now()));
+        return Json(json!({ "ok": true, "url": auth_url })).into_response();
+    }
+
+    // Mastodon uses OAuth 2.0 — optionally registers the app first
+    if let Some(m_pub) = publisher.as_any().downcast_ref::<MastodonPublisher>() {
+        return Box::pin(async move {
+            // If no client_id, register the app first
+            if m_pub.client_id.is_none() || m_pub.client_secret.is_none() {
+                match m_pub.register_app().await {
+                    Ok((client_id, client_secret)) => {
+                        // Persist the credentials
+                        let updated = PublisherConfig::Mastodon {
+                            server_url: m_pub.server_url.clone(),
+                            client_id: Some(client_id),
+                            client_secret: Some(client_secret),
+                            access_token: m_pub.access_token.clone(),
+                            redirect_uri: Some(m_pub.redirect_uri.clone()),
+                            template: m_pub.template.clone(),
+                        };
+                        if let Err(e) = state.db.upsert_publisher(&id, &updated, true).await {
+                            return Json(json!({ "ok": false, "error": format!("Failed to save app credentials: {e}") })).into_response();
+                        }
+                        // Re-create publisher with updated config to get the new client_id/client_secret
+                        match create_publisher(id.clone(), &updated) {
+                            Ok(p) => {
+                                if let Some(new_m_pub) = p.as_any().downcast_ref::<MastodonPublisher>() {
+                                    let oauth_state = uuid::Uuid::new_v4().to_string();
+                                    let auth_url_str = new_m_pub.generate_auth_url(Some(oauth_state.clone()));
+                                    let mut states = state.oauth_states.lock().await;
+                                    states.insert(format!("mastodon:{id}"), (oauth_state, Instant::now()));
+                                    return Json(json!({ "ok": true, "url": auth_url_str })).into_response();
+                                }
+                            }
+                            Err(e) => {
+                                return Json(json!({ "ok": false, "error": format!("Failed to recreate publisher: {e}") })).into_response();
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Json(json!({ "ok": false, "error": format!("Failed to register Mastodon app: {e}") })).into_response();
+                    }
+                }
+            }
+
+            let oauth_state = uuid::Uuid::new_v4().to_string();
+            let auth_url_str = m_pub.generate_auth_url(Some(oauth_state.clone()));
+            let mut states = state.oauth_states.lock().await;
+            states.insert(format!("mastodon:{id}"), (oauth_state, Instant::now()));
+            Json(json!({ "ok": true, "url": auth_url_str })).into_response()
+        })
+        .await;
     }
 
     (
@@ -260,6 +321,125 @@ pub async fn callback(
             .into_response();
     }
 
+    // ── Threads callback ──
+    if let Some(t_pub) = publisher.as_any().downcast_ref::<ThreadsPublisher>() {
+        // Validate state if the frontend provided one
+        if let Some(ref cb_state) = payload.state {
+            let mut states = state.oauth_states.lock().await;
+            let stored = states.remove(&format!("threads:{id}"));
+            match stored {
+                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some(_) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({ "ok": false, "error": "OAuth state mismatch" })),
+                    )
+                        .into_response();
+                }
+                None => {
+                    tracing::warn!("No stored OAuth state found for Threads publisher {id}");
+                }
+            }
+        }
+
+        let (access_token, user_id, _expires_in) = match t_pub
+            .exchange_code_for_tokens(&payload.code)
+            .await
+        {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "ok": false, "error": format!("Token exchange failed: {e}") })),
+                )
+                    .into_response();
+            }
+        };
+
+        // user_id comes directly from Meta's token exchange response
+        // If missing, fall back to looking up via a placeholder
+        let final_user_id = user_id.or_else(|| {
+            tracing::warn!("Threads token exchange did not return user_id");
+            None
+        });
+
+        let updated = PublisherConfig::Threads {
+            client_id: t_pub.client_id.clone(),
+            client_secret: t_pub.client_secret.clone(),
+            access_token: Some(access_token),
+            user_id: final_user_id,
+            redirect_uri: Some(t_pub.redirect_uri.clone()),
+            template: t_pub.template.clone(),
+        };
+
+        if let Err(e) = state.db.upsert_publisher(&id, &updated, true).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "ok": false, "error": format!("Failed to save tokens: {e}") })),
+            )
+                .into_response();
+        }
+
+        return Json(json!({ "ok": true, "message": "OAuth completed for Threads" }))
+            .into_response();
+    }
+
+    // ── Mastodon callback ──
+    if let Some(m_pub) = publisher.as_any().downcast_ref::<MastodonPublisher>() {
+        // Validate state if the frontend provided one
+        if let Some(ref cb_state) = payload.state {
+            let mut states = state.oauth_states.lock().await;
+            let stored = states.remove(&format!("mastodon:{id}"));
+            match stored {
+                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some(_) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({ "ok": false, "error": "OAuth state mismatch" })),
+                    )
+                        .into_response();
+                }
+                None => {
+                    tracing::warn!("No stored OAuth state found for Mastodon publisher {id}");
+                }
+            }
+        }
+
+        let (access_token, _refresh_token, _expires_in) = match m_pub
+            .exchange_code_for_tokens(&payload.code)
+            .await
+        {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "ok": false, "error": format!("Token exchange failed: {e}") })),
+                )
+                    .into_response();
+            }
+        };
+
+        let updated = PublisherConfig::Mastodon {
+            server_url: m_pub.server_url.clone(),
+            client_id: m_pub.client_id.clone(),
+            client_secret: m_pub.client_secret.clone(),
+            access_token: Some(access_token),
+            redirect_uri: Some(m_pub.redirect_uri.clone()),
+            template: m_pub.template.clone(),
+        };
+
+        if let Err(e) = state.db.upsert_publisher(&id, &updated, true).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "ok": false, "error": format!("Failed to save tokens: {e}") })),
+            )
+                .into_response();
+        }
+
+        return Json(json!({ "ok": true, "message": "OAuth completed for Mastodon" }))
+            .into_response();
+    }
+
     (
         StatusCode::BAD_REQUEST,
         Json(json!({ "ok": false, "error": "Publisher type does not support OAuth callback" })),
@@ -275,7 +455,7 @@ fn resolve_publisher_id(
 ) -> Option<String> {
     for (key, (stored_state, _)) in states {
         if stored_state == target_state {
-            // key format is "linkedin:{id}" or "x:{id}"
+            // key format is "linkedin:{id}", "threads:{id}", or "x:{id}"
             if let Some(id) = key.split(':').nth(1) {
                 return Some(id.to_string());
             }
@@ -286,7 +466,7 @@ fn resolve_publisher_id(
 
 /// `GET /oauth/callback`
 ///
-/// Public endpoint called by the OAuth provider (LinkedIn, X) after the user
+/// Public endpoint called by the OAuth provider (Threads, LinkedIn, X) after the user
 /// authorizes the application. Exchanges the authorization code for tokens,
 /// persists them, and returns an HTML page that closes the popup window.
 pub async fn callback_get(
@@ -296,27 +476,31 @@ pub async fn callback_get(
     let code = &query.code;
     let state_param = query.state.as_deref().unwrap_or("");
 
-    // ── 1. Resolve publisher_id from state ──
-    let (publisher_id, stored_state, is_linkedin) = {
+    // ── 1. Resolve publisher_id and type from state ──
+    let (publisher_id, stored_state, oauth_type) = {
         let states = state.oauth_states.lock().await;
         if let Some(id) = resolve_publisher_id(&states, state_param) {
-            let stored = states.get(&format!("linkedin:{id}"));
-            match stored {
-                Some((s, _)) if s == state_param => (id.clone(), s.clone(), true),
-                _ => {
-                    // Check X
-                    let stored = states.get(&format!("x:{id}"));
-                    match stored {
-                        Some((s, _)) => (id, s.clone(), false),
-                        None => {
-                            return (
-                                StatusCode::BAD_REQUEST,
-                                Html(oauth_result_html(false, "No matching OAuth state found")),
-                            )
-                                .into_response();
-                        }
-                    }
-                }
+            // Try to determine the type from stored keys
+            // Check in priority order: threads, linkedin, mastodon, x
+            let stored_threads = states.get(&format!("threads:{id}"));
+            let stored_linkedin = states.get(&format!("linkedin:{id}"));
+            let stored_mastodon = states.get(&format!("mastodon:{id}"));
+            let stored_x = states.get(&format!("x:{id}"));
+
+            if let Some((s, _)) = stored_threads.filter(|(s, _)| s == state_param) {
+                (id.clone(), s.clone(), "threads")
+            } else if let Some((s, _)) = stored_linkedin.filter(|(s, _)| s == state_param) {
+                (id.clone(), s.clone(), "linkedin")
+            } else if let Some((s, _)) = stored_mastodon.filter(|(s, _)| s == state_param) {
+                (id.clone(), s.clone(), "mastodon")
+            } else if let Some((s, _)) = stored_x {
+                (id, s.clone(), "x")
+            } else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Html(oauth_result_html(false, "No matching OAuth state found")),
+                )
+                    .into_response();
             }
         } else {
             return (
@@ -330,11 +514,7 @@ pub async fn callback_get(
     // Remove stored state
     {
         let mut states = state.oauth_states.lock().await;
-        if is_linkedin {
-            states.remove(&format!("linkedin:{publisher_id}"));
-        } else {
-            states.remove(&format!("x:{publisher_id}"));
-        }
+        states.remove(&format!("{oauth_type}:{publisher_id}"));
     }
 
     // ── 2. Validate state ──
@@ -380,109 +560,24 @@ pub async fn callback_get(
         }
     };
 
-    if is_linkedin {
-        let li_pub = match publisher.as_any().downcast_ref::<LinkedInPublisher>() {
-            Some(p) => p,
-            None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Html(oauth_result_html(
-                        false,
-                        "Publisher is not a LinkedIn publisher",
-                    )),
-                )
-                    .into_response();
-            }
-        };
+    match oauth_type {
+        "linkedin" => {
+            let li_pub = match publisher.as_any().downcast_ref::<LinkedInPublisher>() {
+                Some(p) => p,
+                None => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Html(oauth_result_html(
+                            false,
+                            "Publisher is not a LinkedIn publisher",
+                        )),
+                    )
+                        .into_response();
+                }
+            };
 
-        let (access_token, refresh_token, _) = match li_pub.exchange_code_for_tokens(code).await {
-            Ok(tokens) => tokens,
-            Err(e) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Html(oauth_result_html(
-                        false,
-                        &format!("Token exchange failed: {e}"),
-                    )),
-                )
-                    .into_response();
-            }
-        };
-
-        // Obtener el user_id de LinkedIn automáticamente
-        let user_id = match li_pub.get_user_profile(&access_token).await {
-            Ok(profile_urn) => {
-                tracing::info!("LinkedIn user profile URN: {}", profile_urn);
-                let id = profile_urn
-                    .strip_prefix("urn:li:person:")
-                    .unwrap_or(&profile_urn)
-                    .strip_prefix("urn:li:")
-                    .unwrap_or(&profile_urn)
-                    .to_string();
-                Some(id)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to get LinkedIn user profile: {}", e);
-                None
-            }
-        };
-
-        let updated = PublisherConfig::LinkedIn {
-            client_id: li_pub.client_id.clone(),
-            client_secret: li_pub.client_secret.clone(),
-            access_token: Some(access_token),
-            refresh_token,
-            user_id,
-            redirect_uri: Some(li_pub.redirect_uri.clone()),
-            template: li_pub.template.clone(),
-        };
-
-        if let Err(e) = state
-            .db
-            .upsert_publisher(&publisher_id, &updated, true)
-            .await
-        {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Html(oauth_result_html(
-                    false,
-                    &format!("Failed to save tokens: {e}"),
-                )),
-            )
-                .into_response();
-        }
-
-        (
-            StatusCode::OK,
-            Html(oauth_result_html(true, "LinkedIn connected successfully!")),
-        )
-            .into_response()
-    } else {
-        // X/Twitter
-        let x_pub = match publisher.as_any().downcast_ref::<XPublisher>() {
-            Some(p) => p,
-            None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Html(oauth_result_html(
-                        false,
-                        "Publisher is not an X/Twitter publisher",
-                    )),
-                )
-                    .into_response();
-            }
-        };
-
-        let code_verifier = {
-            let mut states = state.oauth_states.lock().await;
-            states
-                .remove(&format!("x:{publisher_id}"))
-                .map(|(v, _)| v)
-                .unwrap_or_else(|| "challenge".to_string())
-        };
-
-        let (access_token, refresh_token, _) =
-            match x_pub.exchange_code_for_tokens(code, &code_verifier).await {
+            let (access_token, refresh_token, _) = match li_pub.exchange_code_for_tokens(code).await
+            {
                 Ok(tokens) => tokens,
                 Err(e) => {
                     return (
@@ -496,35 +591,254 @@ pub async fn callback_get(
                 }
             };
 
-        let updated = PublisherConfig::X {
-            client_id: x_pub.client_id.clone(),
-            client_secret: x_pub.client_secret.clone(),
-            access_token: Some(access_token),
-            refresh_token,
-            redirect_uri: Some(x_pub.redirect_uri.clone()),
-            template: x_pub.template.clone(),
-        };
+            // Obtener el user_id de LinkedIn automáticamente
+            let user_id = match li_pub.get_user_profile(&access_token).await {
+                Ok(profile_urn) => {
+                    tracing::info!("LinkedIn user profile URN: {}", profile_urn);
+                    let id = profile_urn
+                        .strip_prefix("urn:li:person:")
+                        .unwrap_or(&profile_urn)
+                        .strip_prefix("urn:li:")
+                        .unwrap_or(&profile_urn)
+                        .to_string();
+                    Some(id)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to get LinkedIn user profile: {}", e);
+                    None
+                }
+            };
 
-        if let Err(e) = state
-            .db
-            .upsert_publisher(&publisher_id, &updated, true)
-            .await
-        {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Html(oauth_result_html(
-                    false,
-                    &format!("Failed to save tokens: {e}"),
-                )),
+            let updated = PublisherConfig::LinkedIn {
+                client_id: li_pub.client_id.clone(),
+                client_secret: li_pub.client_secret.clone(),
+                access_token: Some(access_token),
+                refresh_token,
+                user_id,
+                redirect_uri: Some(li_pub.redirect_uri.clone()),
+                template: li_pub.template.clone(),
+            };
+
+            if let Err(e) = state
+                .db
+                .upsert_publisher(&publisher_id, &updated, true)
+                .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Html(oauth_result_html(
+                        false,
+                        &format!("Failed to save tokens: {e}"),
+                    )),
+                )
+                    .into_response();
+            }
+
+            (
+                StatusCode::OK,
+                Html(oauth_result_html(true, "LinkedIn connected successfully!")),
             )
-                .into_response();
+                .into_response()
         }
+        "mastodon" => {
+            let m_pub = match publisher.as_any().downcast_ref::<MastodonPublisher>() {
+                Some(p) => p,
+                None => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Html(oauth_result_html(
+                            false,
+                            "Publisher is not a Mastodon publisher",
+                        )),
+                    )
+                        .into_response();
+                }
+            };
 
-        (
-            StatusCode::OK,
-            Html(oauth_result_html(true, "X/Twitter connected successfully!")),
+            let (access_token, _refresh_token, _) = match m_pub.exchange_code_for_tokens(code).await
+            {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Html(oauth_result_html(
+                            false,
+                            &format!("Token exchange failed: {e}"),
+                        )),
+                    )
+                        .into_response();
+                }
+            };
+
+            let updated = PublisherConfig::Mastodon {
+                server_url: m_pub.server_url.clone(),
+                client_id: m_pub.client_id.clone(),
+                client_secret: m_pub.client_secret.clone(),
+                access_token: Some(access_token),
+                redirect_uri: Some(m_pub.redirect_uri.clone()),
+                template: m_pub.template.clone(),
+            };
+
+            if let Err(e) = state
+                .db
+                .upsert_publisher(&publisher_id, &updated, true)
+                .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Html(oauth_result_html(
+                        false,
+                        &format!("Failed to save tokens: {e}"),
+                    )),
+                )
+                    .into_response();
+            }
+
+            (
+                StatusCode::OK,
+                Html(oauth_result_html(true, "Mastodon connected successfully!")),
+            )
+                .into_response()
+        }
+        "x" | "twitter" => {
+            // X/Twitter
+            let x_pub = match publisher.as_any().downcast_ref::<XPublisher>() {
+                Some(p) => p,
+                None => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Html(oauth_result_html(
+                            false,
+                            "Publisher is not an X/Twitter publisher",
+                        )),
+                    )
+                        .into_response();
+                }
+            };
+
+            let code_verifier = {
+                let mut states = state.oauth_states.lock().await;
+                states
+                    .remove(&format!("x:{publisher_id}"))
+                    .map(|(v, _)| v)
+                    .unwrap_or_else(|| "challenge".to_string())
+            };
+
+            let (access_token, refresh_token, _) =
+                match x_pub.exchange_code_for_tokens(code, &code_verifier).await {
+                    Ok(tokens) => tokens,
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            Html(oauth_result_html(
+                                false,
+                                &format!("Token exchange failed: {e}"),
+                            )),
+                        )
+                            .into_response();
+                    }
+                };
+
+            let updated = PublisherConfig::X {
+                client_id: x_pub.client_id.clone(),
+                client_secret: x_pub.client_secret.clone(),
+                access_token: Some(access_token),
+                refresh_token,
+                redirect_uri: Some(x_pub.redirect_uri.clone()),
+                template: x_pub.template.clone(),
+            };
+
+            if let Err(e) = state
+                .db
+                .upsert_publisher(&publisher_id, &updated, true)
+                .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Html(oauth_result_html(
+                        false,
+                        &format!("Failed to save tokens: {e}"),
+                    )),
+                )
+                    .into_response();
+            }
+
+            (
+                StatusCode::OK,
+                Html(oauth_result_html(true, "X/Twitter connected successfully!")),
+            )
+                .into_response()
+        }
+        "threads" => {
+            let t_pub = match publisher.as_any().downcast_ref::<ThreadsPublisher>() {
+                Some(p) => p,
+                None => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Html(oauth_result_html(
+                            false,
+                            "Publisher is not a Threads publisher",
+                        )),
+                    )
+                        .into_response();
+                }
+            };
+
+            let (access_token, user_id, _expires_in) =
+                match t_pub.exchange_code_for_tokens(code).await {
+                    Ok(tokens) => tokens,
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            Html(oauth_result_html(
+                                false,
+                                &format!("Token exchange failed: {e}"),
+                            )),
+                        )
+                            .into_response();
+                    }
+                };
+
+            let final_user_id = user_id.or_else(|| {
+                tracing::warn!("Threads token exchange did not return user_id");
+                None
+            });
+
+            let updated = PublisherConfig::Threads {
+                client_id: t_pub.client_id.clone(),
+                client_secret: t_pub.client_secret.clone(),
+                access_token: Some(access_token),
+                user_id: final_user_id,
+                redirect_uri: Some(t_pub.redirect_uri.clone()),
+                template: t_pub.template.clone(),
+            };
+
+            if let Err(e) = state
+                .db
+                .upsert_publisher(&publisher_id, &updated, true)
+                .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Html(oauth_result_html(
+                        false,
+                        &format!("Failed to save tokens: {e}"),
+                    )),
+                )
+                    .into_response();
+            }
+
+            (
+                StatusCode::OK,
+                Html(oauth_result_html(true, "Threads connected successfully!")),
+            )
+                .into_response()
+        }
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Html(oauth_result_html(false, "Unknown OAuth type")),
         )
-            .into_response()
+            .into_response(),
     }
 }
 

@@ -31,7 +31,10 @@ const TYPE_FIELDS: Record<string, { name: string; label: string; isPassword?: bo
   ],
   Mastodon: [
     { name: "server_url", label: "Server URL" },
+    { name: "client_id", label: "Client ID" },
+    { name: "client_secret", label: "Client Secret", isPassword: true },
     { name: "access_token", label: "Access Token", isPassword: true },
+    { name: "redirect_uri", label: "Redirect URI" },
   ],
   LinkedIn: [
     { name: "client_id", label: "Client ID" },
@@ -52,8 +55,11 @@ const TYPE_FIELDS: Record<string, { name: string; label: string; isPassword?: bo
     { name: "pds_url", label: "PDS URL" },
   ],
   Threads: [
+    { name: "client_id", label: "Client ID" },
+    { name: "client_secret", label: "Client Secret", isPassword: true },
     { name: "access_token", label: "Access Token", isPassword: true },
     { name: "user_id", label: "User ID" },
+    { name: "redirect_uri", label: "Redirect URI" },
   ],
   Discord: [
     { name: "webhook_url", label: "Webhook URL" },
@@ -239,7 +245,7 @@ export default function PublisherList() {
       render: (_: unknown, record: { id: string; config: PublisherConfigEntry }) => {
         const type = record.config.type;
         const cfg = record.config.config;
-        const isOAuthType = type === "X" || type === "LinkedIn";
+        const isOAuthType = type === "X" || type === "LinkedIn" || type === "Threads" || type === "Mastodon";
         const connected = !!(cfg.access_token);
 
         return (
