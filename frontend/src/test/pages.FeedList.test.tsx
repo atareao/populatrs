@@ -128,7 +128,7 @@ describe("FeedList", () => {
     });
   });
 
-  it("calls toggle when switch is clicked", async () => {
+  it("shows enabled/disabled status with emoji", async () => {
     mockMultiFetch({
       "/api/feeds": { status: 200, body: mockFeeds },
       "/api/publishers": { status: 200, body: mockPublishers },
@@ -139,15 +139,9 @@ describe("FeedList", () => {
       expect(screen.getByText("My Blog")).toBeInTheDocument();
     });
 
-    const switches = screen.getAllByRole("switch");
-    await userEvent.click(switches[0]);
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/feeds/blog",
-        expect.objectContaining({ method: "PATCH" }),
-      );
-    });
+    // My Blog is enabled (✅), My Channel is disabled (❌)
+    expect(screen.getByText("✅")).toBeInTheDocument();
+    expect(screen.getByText("❌")).toBeInTheDocument();
   });
 
   it("calls run when run button is clicked", async () => {

@@ -3,7 +3,7 @@ import {
   Table, Button, Modal, Form, Input, Select, Switch, Typography, Space, Tag, message, Popconfirm,
 } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, LoadingOutlined } from "@ant-design/icons";
-import { fetchFeeds, createFeed, updateFeed, deleteFeed, toggleFeed, runFeed, fetchPublishers, type FeedConfig, type FeedPublisherBinding } from "../../api/http";
+import { fetchFeeds, createFeed, updateFeed, deleteFeed, runFeed, fetchPublishers, type FeedConfig, type FeedPublisherBinding } from "../../api/http";
 
 const { Title, Text } = Typography;
 
@@ -65,15 +65,6 @@ export default function FeedList() {
     }
   };
 
-  const handleToggle = async (id: string) => {
-    try {
-      await toggleFeed(id);
-      loadData();
-    } catch (e) {
-      message.error("Failed to toggle feed");
-    }
-  };
-
   const handleRun = async (id: string, name: string) => {
     setRunningFeeds((prev) => new Set(prev).add(id));
     try {
@@ -128,11 +119,10 @@ export default function FeedList() {
   const columns = [
     { title: "Name", dataIndex: "name", key: "name" },
     { title: "Type", dataIndex: "type", key: "type", render: (t: string) => <Tag>{t}</Tag> },
-    { title: "ID", dataIndex: "id", key: "id", ellipsis: true },
     {
       title: "Enabled", dataIndex: "enabled", key: "enabled",
-      render: (_: boolean, record: FeedConfig) => (
-        <Switch checked={record.enabled} onChange={() => handleToggle(record.id)} />
+      render: (enabled: boolean) => (
+        <span>{enabled ? "✅" : "❌"}</span>
       ),
     },
     {

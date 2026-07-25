@@ -111,7 +111,10 @@ pub enum PublisherConfig {
     },
     Mastodon {
         server_url: String,
-        access_token: String,
+        client_id: Option<String>,
+        client_secret: Option<String>,
+        access_token: Option<String>,
+        redirect_uri: Option<String>,
         template: String,
     },
     LinkedIn {
@@ -143,8 +146,11 @@ pub enum PublisherConfig {
         template: String,
     },
     Threads {
-        access_token: String,
-        user_id: String,
+        client_id: String,
+        client_secret: String,
+        access_token: Option<String>,
+        user_id: Option<String>,
+        redirect_uri: Option<String>,
         template: String,
     },
     Discord {
