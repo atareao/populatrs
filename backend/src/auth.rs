@@ -7,6 +7,7 @@ use tokio::sync::{broadcast, RwLock};
 
 use crate::config::Config;
 use crate::db::Database;
+use crate::models::PublisherManager;
 
 // ───── Log Entry (broadcast via SSE) ─────
 
@@ -156,10 +157,16 @@ pub struct AppState {
     pub oauth_states: OidcStates,
     /// Broadcast sender for log entries (SSE to LogsPage).
     pub log_tx: broadcast::Sender<LogEntry>,
+    pub publisher_manager: Arc<PublisherManager>,
 }
 
 impl AppState {
-    pub fn new(config: Config, db: Database, log_tx: broadcast::Sender<LogEntry>) -> Self {
+    pub fn new(
+        config: Config,
+        db: Database,
+        log_tx: broadcast::Sender<LogEntry>,
+        publisher_manager: Arc<PublisherManager>,
+    ) -> Self {
         let jwt_validator = if config.oidc_configured() {
             JwtValidator::new(
                 config.oidc_issuer_url.as_deref().unwrap_or(""),
@@ -177,6 +184,7 @@ impl AppState {
             oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             log_tx,
+            publisher_manager,
         }
     }
 }

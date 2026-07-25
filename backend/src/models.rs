@@ -300,13 +300,16 @@ impl Feed {
     }
 
     pub async fn fetch_posts(&self) -> anyhow::Result<Vec<Post>> {
-        match self.config.feed_type.to_lowercase().as_str() {
-            "rss" => crate::feed::fetch_rss_posts(&self.config).await,
+        let mut posts = match self.config.feed_type.to_lowercase().as_str() {
+            "rss" => crate::feed::fetch_rss_posts(&self.config).await?,
             "youtube" => {
-                crate::feed::fetch_youtube_posts(&self.config, self.youtube_config.as_ref()).await
+                crate::feed::fetch_youtube_posts(&self.config, self.youtube_config.as_ref()).await?
             }
-            other => Err(anyhow::anyhow!("Unknown feed type: {}", other)),
-        }
+            other => return Err(anyhow::anyhow!("Unknown feed type: {}", other)),
+        };
+        // Sort oldest-first so posts are published in chronological order
+        posts.sort_by_key(|p| p.published_date);
+        Ok(posts)
     }
 }
 

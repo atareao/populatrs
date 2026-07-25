@@ -5,9 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import Settings from "../pages/Settings";
 
-const mockStorage = {
-  data_dir: "/app/data",
-};
+const mockYoutube = { api_key: "AIzaSyTest123" };
+const emptyYoutube = { api_key: "" };
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({
@@ -42,7 +41,7 @@ describe("Settings", () => {
   });
 
   it("renders the settings page title", async () => {
-    mockFetch(200, mockStorage);
+    mockFetch(200, mockYoutube);
     renderSettings();
 
     await waitFor(() => {
@@ -50,57 +49,45 @@ describe("Settings", () => {
     });
   });
 
-  it("loads and displays current configuration", async () => {
-    mockFetch(200, mockStorage);
+  it("loads and displays youtube config section", async () => {
+    mockFetch(200, mockYoutube);
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText("Current Configuration")).toBeInTheDocument();
+      expect(screen.getByText("YouTube Configuration")).toBeInTheDocument();
     });
-
-    expect(screen.getByText("/app/data")).toBeInTheDocument();
   });
 
-  it("renders edit form with loaded values", async () => {
-    mockFetch(200, mockStorage);
+  it("saves youtube config on form submit", async () => {
+    mockFetch(200, mockYoutube);
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText("Edit Storage Config")).toBeInTheDocument();
+      expect(screen.getByText("YouTube Configuration")).toBeInTheDocument();
     });
 
-    const inputs = screen.getAllByRole("textbox");
-    expect(inputs.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("saves storage config on form submit", async () => {
-    mockFetch(200, mockStorage);
-    renderSettings();
-
-    await waitFor(() => {
-      expect(screen.getByText("Edit Storage Config")).toBeInTheDocument();
-    });
-
-    // Mock the PUT response
+    // Mock PUT response
     mockFetch(200, { status: "ok" });
 
-    const saveBtn = screen.getByRole("button", { name: /save changes/i });
+    const saveBtn = screen.getByRole("button", { name: /save/i });
     await userEvent.click(saveBtn);
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        "/api/storage",
+        "/api/youtube",
         expect.objectContaining({ method: "PUT" }),
       );
     });
   });
 
-  it("shows warning about restart requirement", async () => {
-    mockFetch(200, mockStorage);
+  it("shows info about youtube api key", async () => {
+    mockFetch(200, emptyYoutube);
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText(/will apply after a server restart/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/YouTube Data API v3 key/i),
+      ).toBeInTheDocument();
     });
   });
 });

@@ -1,34 +1,29 @@
 import { useEffect, useState } from "react";
-import { Card, Form, Input, Button, Typography, message, Spin, Descriptions, Alert } from "antd";
-import { DatabaseOutlined, SaveOutlined, InfoCircleOutlined, FolderOutlined } from "@ant-design/icons";
-import { fetchStorage, updateStorage, type StorageConfig } from "../api/http";
+import { Card, Form, Input, Button, Typography, message, Spin, Alert } from "antd";
+import { SaveOutlined, InfoCircleOutlined, YoutubeOutlined } from "@ant-design/icons";
+import { fetchYoutubeConfig, updateYoutubeConfig } from "../api/http";
 
 const { Title } = Typography;
 
 export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [currentDataDir, setCurrentDataDir] = useState<string>("");
   const [form] = Form.useForm();
 
   useEffect(() => {
-    fetchStorage()
-      .then((data) => {
-        form.setFieldsValue(data);
-        setCurrentDataDir(data.data_dir);
-      })
-      .catch(() => message.error("Failed to load storage config"))
+    fetchYoutubeConfig()
+      .then((data) => form.setFieldsValue(data))
+      .catch(() => message.error("Failed to load config"))
       .finally(() => setLoading(false));
   }, [form]);
 
-  const handleSubmit = async (values: StorageConfig) => {
+  const handleSubmit = async (values: { api_key: string }) => {
     setSaving(true);
     try {
-      await updateStorage(values);
-      setCurrentDataDir(values.data_dir);
-      message.success("Storage config saved");
+      await updateYoutubeConfig(values);
+      message.success("YouTube config saved");
     } catch {
-      message.error("Failed to save storage config");
+      message.error("Failed to save YouTube config");
     } finally {
       setSaving(false);
     }
@@ -39,23 +34,13 @@ export default function Settings() {
   return (
     <div className="fade-in-up">
       <Title level={3}>
-        <DatabaseOutlined /> Settings
+        <YoutubeOutlined /> Settings
       </Title>
 
-      {/* Current configuration */}
-      <Card style={{ marginBottom: 16, maxWidth: 600 }}>
-        <Descriptions title="Current Configuration" column={1} size="small">
-          <Descriptions.Item label={<><FolderOutlined /> Data Directory</>}>
-            <code>{currentDataDir}</code>
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
-
-      {/* Edit form */}
-      <Card title="Edit Storage Config" style={{ maxWidth: 600 }}>
+      <Card title={<><YoutubeOutlined /> YouTube Configuration</>} style={{ maxWidth: 600 }}>
         <Alert
-          message="Storage paths are configured via environment variables. Changes here will apply after a server restart."
-          type="warning"
+          message="A YouTube Data API v3 key is needed to fetch videos and resolve @handles to channel IDs. Get one at https://console.cloud.google.com/apis/credentials"
+          type="info"
           showIcon
           icon={<InfoCircleOutlined />}
           style={{ marginBottom: 20 }}
@@ -64,18 +49,17 @@ export default function Settings() {
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
-          initialValues={{ data_dir: "./data" }}
+          initialValues={{ api_key: "" }}
         >
           <Form.Item
-            name="data_dir"
-            label="Data Directory"
-            rules={[{ required: true, message: "Please enter the data directory path" }]}
-            help="Path where data files are stored (e.g. ./data, /app/data)"
+            name="api_key"
+            label="YouTube Data API Key"
+            rules={[{ required: true, message: "API key is required for YouTube feeds" }]}
           >
-            <Input placeholder="./data" />
+            <Input.Password placeholder="AIzaSy..." />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={saving} icon={<SaveOutlined />}>
-            Save Changes
+            Save
           </Button>
         </Form>
       </Card>

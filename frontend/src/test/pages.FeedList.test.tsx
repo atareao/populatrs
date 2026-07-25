@@ -144,7 +144,7 @@ describe("FeedList", () => {
     expect(screen.getByText("❌")).toBeInTheDocument();
   });
 
-  it("calls run when run button is clicked", async () => {
+  it("calls run with publish=true when execute is clicked", async () => {
     mockMultiFetch({
       "/api/feeds": { status: 200, body: mockFeeds },
       "/api/publishers": { status: 200, body: mockPublishers },
@@ -155,12 +155,23 @@ describe("FeedList", () => {
       expect(screen.getByText("My Blog")).toBeInTheDocument();
     });
 
+    // Click Run → confirmation modal opens
     const runButtons = screen.getAllByRole("button", { name: /run/i });
     await userEvent.click(runButtons[0]);
 
+    // Wait for the run modal with the switch
+    await waitFor(() => {
+      expect(screen.getByText("Publish to publishers")).toBeInTheDocument();
+    });
+
+    // Switch is ON by default (publish=true)
+    // Click Execute
+    const executeButton = screen.getByRole("button", { name: /execute/i });
+    await userEvent.click(executeButton);
+
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        "/api/feeds/blog/run",
+        "/api/feeds/blog/run?publish=true",
         expect.objectContaining({ method: "POST" }),
       );
     });

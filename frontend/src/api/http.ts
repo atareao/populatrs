@@ -135,8 +135,14 @@ export async function updateStorage(storage: StorageConfig): Promise<void> {
 }
 
 // Run feed manually
-export async function runFeed(id: string): Promise<{ posts_count: number; posts: unknown[] }> {
-  return fetcher(`/api/feeds/${id}/run`, { method: "POST" });
+// publish=true: fetch + publish to publishers + mark as published
+// publish=false: fetch + mark as published only (no publisher results)
+export async function runFeed(id: string, publish = false): Promise<{ posts_count: number; posts: { guid: string; title: string; url: string }[] }> {
+  return fetcher(`/api/feeds/${id}/run?publish=${publish}`, { method: "POST" });
+}
+
+export async function resolveYoutubeUrl(url: string): Promise<{ channel_id: string }> {
+  return fetcher("/api/feeds/resolve-youtube", { method: "POST", body: { url } });
 }
 
 // OAuth
@@ -188,4 +194,17 @@ export async function updateLogRetention(days: number): Promise<{ status: string
 // Status
 export async function fetchStatus(): Promise<DashboardStatus> {
   return fetcher("/api/status");
+}
+
+// YouTube config
+export interface YouTubeConfig {
+  api_key: string;
+}
+
+export async function fetchYoutubeConfig(): Promise<YouTubeConfig> {
+  return fetcher("/api/youtube");
+}
+
+export async function updateYoutubeConfig(config: YouTubeConfig): Promise<void> {
+  return fetcher("/api/youtube", { method: "PUT", body: config });
 }
