@@ -73,11 +73,12 @@ pub async fn authorize(
 
     // ── 3. Downcast and generate auth URL ──
 
-    // X/Twitter uses OAuth 2.0 PKCE — store the code_verifier
+    // X/Twitter uses OAuth 2.0 PKCE — store the state for validation
     if let Some(x_pub) = publisher.as_any().downcast_ref::<XPublisher>() {
-        let (auth_url, code_verifier) = x_pub.generate_auth_url(None);
+        let oauth_state = uuid::Uuid::new_v4().to_string();
+        let (auth_url, _code_verifier) = x_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("x:{id}"), (code_verifier, Instant::now()));
+        states.insert(format!("x:{id}"), (oauth_state, Instant::now()));
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -202,13 +203,27 @@ pub async fn callback(
 
     // ── X/Twitter callback ──
     if let Some(x_pub) = publisher.as_any().downcast_ref::<XPublisher>() {
-        let code_verifier = {
+        // Validate state if the frontend provided one
+        if let Some(ref cb_state) = payload.state {
             let mut states = state.oauth_states.lock().await;
-            states
-                .remove(&format!("x:{id}"))
-                .map(|(v, _)| v)
-                .unwrap_or_else(|| "challenge".to_string())
-        };
+            let stored = states.remove(&format!("x:{id}"));
+            match stored {
+                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some(_) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({ "ok": false, "error": "OAuth state mismatch" })),
+                    )
+                        .into_response();
+                }
+                None => {
+                    tracing::warn!("No stored OAuth state found for X publisher {id}");
+                }
+            }
+        }
+
+        // code_verifier is hardcoded to "challenge" in generate_auth_url
+        let code_verifier = "challenge".to_string();
 
         let (access_token, refresh_token, _expires_in) = match x_pub
             .exchange_code_for_tokens(&payload.code, &code_verifier)
@@ -493,7 +508,7 @@ pub async fn callback_get(
                 (id.clone(), s.clone(), "linkedin")
             } else if let Some((s, _)) = stored_mastodon.filter(|(s, _)| s == state_param) {
                 (id.clone(), s.clone(), "mastodon")
-            } else if let Some((s, _)) = stored_x {
+            } else if let Some((s, _)) = stored_x.filter(|(s, _)| s == state_param) {
                 (id, s.clone(), "x")
             } else {
                 return (
@@ -716,13 +731,8 @@ pub async fn callback_get(
                 }
             };
 
-            let code_verifier = {
-                let mut states = state.oauth_states.lock().await;
-                states
-                    .remove(&format!("x:{publisher_id}"))
-                    .map(|(v, _)| v)
-                    .unwrap_or_else(|| "challenge".to_string())
-            };
+            // X/Twitter — code_verifier is hardcoded to "challenge" in generate_auth_url
+            let code_verifier = "challenge".to_string();
 
             let (access_token, refresh_token, _) =
                 match x_pub.exchange_code_for_tokens(code, &code_verifier).await {

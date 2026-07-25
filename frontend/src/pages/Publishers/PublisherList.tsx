@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Button, Modal, Form, Input, Select, Switch, Typography, Space, Tag, message, Popconfirm, Alert,
+  Table, Button, Modal, Form, Input, Select, Switch, Typography, Space, Tag, message, Popconfirm,
 } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import {
-  fetchPublishers, createPublisher, updatePublisher, testPublisher, deletePublisher, togglePublisher, getOAuthUrl,
+  fetchPublishers, createPublisher, updatePublisher, testPublisher, deletePublisher, getOAuthUrl,
   type PublisherConfigEntry,
 } from "../../api/http";
 
@@ -78,8 +78,9 @@ export default function PublisherList() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string>("Telegram");
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResultVisible, setTestResultVisible] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [form] = Form.useForm();
 
   const loadData = async () => {
@@ -98,7 +99,6 @@ export default function PublisherList() {
   const handleCreate = () => {
     setEditingId(null);
     setSelectedType("Telegram");
-    setTestResult(null);
     form.resetFields();
     form.setFieldsValue({ type: "Telegram" });
     setModalOpen(true);
@@ -107,7 +107,6 @@ export default function PublisherList() {
   const handleEdit = (id: string, config: PublisherConfigEntry) => {
     setEditingId(id);
     setSelectedType(config.type);
-    setTestResult(null);
     form.setFieldsValue({
       id,
       type: config.type,
@@ -115,19 +114,6 @@ export default function PublisherList() {
       enabled: config.enabled,
     });
     setModalOpen(true);
-  };
-
-  const handleToggle = async (id: string) => {
-    try {
-      const { enabled } = await togglePublisher(id);
-      setPublishers(prev => ({
-        ...prev,
-        [id]: { ...prev[id], enabled },
-      }));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      message.error(`Failed to toggle: ${msg}`);
-    }
   };
 
   const handleOAuth = async (id: string, type: string) => {
@@ -185,23 +171,6 @@ export default function PublisherList() {
     }
   };
 
-  const handleTest = async () => {
-    if (!editingId) return;
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const result = await testPublisher(editingId);
-      setTestResult({ type: "success", message: result.message });
-      message.success(`✅ Test OK`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      setTestResult({ type: "error", message: msg });
-      message.error(`❌ Test failed`);
-    } finally {
-      setTesting(false);
-    }
-  };
-
   const handleDelete = async (id: string) => {
     try {
       await deletePublisher(id);
@@ -210,6 +179,46 @@ export default function PublisherList() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       message.error(`Failed to delete: ${msg}`);
+    }
+  };
+
+  const handleTestFromTable = async (id: string) => {
+    setTestingId(id);
+    try {
+      const result = await testPublisher(id);
+      setTestResult({ success: true, message: result.message });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setTestResult({ success: false, message: msg });
+    } finally {
+      setTestingId(null);
+      setTestResultVisible(true);
+    }
+  };
+
+  /** Check if a publisher has all required fields to be considered "configured". */
+  const isPublisherConfigured = (config: Record<string, any>, type: string): boolean => {
+    switch (type) {
+      case "Telegram":
+        return !!(config.bot_token && config.chat_id);
+      case "X":
+        return !!(config.client_id && config.client_secret && config.access_token);
+      case "Mastodon":
+        return !!(config.server_url && config.access_token);
+      case "LinkedIn":
+        return !!(config.client_id && config.client_secret && config.access_token);
+      case "OpenObserve":
+        return !!(config.url && config.organization && config.stream_name && config.access_token);
+      case "Matrix":
+        return !!(config.homeserver_url && config.access_token && config.room_id);
+      case "Bluesky":
+        return !!(config.handle && config.password);
+      case "Threads":
+        return !!(config.client_id && config.client_secret && config.access_token);
+      case "Discord":
+        return !!(config.webhook_url);
+      default:
+        return false;
     }
   };
 
@@ -233,11 +242,7 @@ export default function PublisherList() {
     {
       title: "Enabled", key: "enabled",
       render: (_: unknown, record: { id: string; config: PublisherConfigEntry }) => (
-        <Switch
-          checked={record.config.enabled}
-          onChange={() => handleToggle(record.id)}
-          size="small"
-        />
+        <span>{record.config.enabled ? "✅" : "❌"}</span>
       ),
     },
     {
@@ -247,6 +252,8 @@ export default function PublisherList() {
         const cfg = record.config.config;
         const isOAuthType = type === "X" || type === "LinkedIn" || type === "Threads" || type === "Mastodon";
         const connected = !!(cfg.access_token);
+
+        const configured = isPublisherConfigured(cfg, type);
 
         return (
           <Space>
@@ -260,6 +267,14 @@ export default function PublisherList() {
                 )
             )}
             <Button size="small" onClick={() => handleEdit(record.id, record.config)}>Edit</Button>
+            <Button
+              size="small"
+              onClick={() => handleTestFromTable(record.id)}
+              disabled={!configured}
+              loading={testingId === record.id}
+            >
+              Test
+            </Button>
             <Popconfirm
               title="Delete publisher"
               description="Are you sure you want to delete this publisher?"
@@ -297,29 +312,12 @@ export default function PublisherList() {
         width={600}
         footer={(_, { OkBtn, CancelBtn }) => (
           <Space>
-            {editingId && (
-              <Button onClick={handleTest} loading={testing} danger>
-                Test
-              </Button>
-            )}
             <CancelBtn />
             <OkBtn />
           </Space>
         )}
       >
         <Form form={form} layout="vertical">
-          {testResult && (
-            <Form.Item>
-              <Alert
-                type={testResult.type}
-                message={testResult.type === "success" ? "✅ Test sent successfully" : "❌ Test failed"}
-                description={testResult.message}
-                showIcon
-                closable
-                onClose={() => setTestResult(null)}
-              />
-            </Form.Item>
-          )}
           {isCreating && (
             <Form.Item name="id" label="Publisher ID" rules={[{ required: true }]}>
               <Input placeholder="my-publisher" />
@@ -350,6 +348,20 @@ export default function PublisherList() {
                 <Input.TextArea rows={3} placeholder="📰 *{{ title }}* - {{ url }}" />
               </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={testResult?.success ? "✅ Test Successful" : "❌ Test Failed"}
+        open={testResultVisible}
+        onOk={() => setTestResultVisible(false)}
+        onCancel={() => setTestResultVisible(false)}
+        footer={[
+          <Button key="ok" type="primary" onClick={() => setTestResultVisible(false)}>
+            OK
+          </Button>,
+        ]}
+      >
+        <p>{testResult?.message}</p>
       </Modal>
     </div>
   );
