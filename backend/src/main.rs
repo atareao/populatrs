@@ -113,6 +113,19 @@ async fn main() {
         Arc::new(JwtValidator::dev())
     };
 
+    // ───── Publisher Manager (shared) ─────
+    let publishers = db.list_publishers().await.unwrap_or_default();
+    let mut publisher_manager = PublisherManager::new();
+    for (id, (pub_config, enabled)) in &publishers {
+        if !enabled {
+            continue;
+        }
+        if let Err(e) = publisher_manager.add_publisher(id.clone(), pub_config) {
+            tracing::error!("Failed to initialize publisher {}: {}", id, e);
+        }
+    }
+    let publisher_manager = Arc::new(publisher_manager);
+
     let app_state = Arc::new(AppState {
         config: config.clone(),
         db: db.clone(),
@@ -121,6 +134,7 @@ async fn main() {
         oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         log_tx,
+        publisher_manager: publisher_manager.clone(),
     });
 
     // ───── Scheduler ─────

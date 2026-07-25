@@ -483,6 +483,7 @@ impl Database {
     }
 
     /// Record a publish result for a specific publisher.
+    /// Skips if a result already exists for this (guid, feed_id, publisher_id).
     pub async fn record_publish_result(
         &self,
         guid: &str,
@@ -491,6 +492,14 @@ impl Database {
         success: bool,
         message: Option<&str>,
     ) -> Result<()> {
+        // Check if already recorded — prevents duplicates
+        if self
+            .is_publish_result_recorded(guid, feed_id, publisher_id)
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
         let now = Utc::now().to_rfc3339();
         let conn = self.conn.lock().await;
         conn.execute(
@@ -500,6 +509,26 @@ impl Database {
         )
         .context("Failed to record publish result")?;
         Ok(())
+    }
+
+    /// Check if a publish result already exists for this (guid, feed_id, publisher_id).
+    pub async fn is_publish_result_recorded(
+        &self,
+        guid: &str,
+        feed_id: &str,
+        publisher_id: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM publish_results WHERE guid = ?1 AND feed_id = ?2 AND publisher_id = ?3",
+                params![guid, feed_id, publisher_id],
+                |_| Ok(true),
+            )
+            .optional()
+            .context("Failed to check publish result")?
+            .unwrap_or(false);
+        Ok(exists)
     }
 
     /// Clean up old published posts (older than `days`).
@@ -590,7 +619,8 @@ impl Database {
         for row in rows {
             let (guid, feed_id, title, url, published_at, publisher_id, success, message) = row?;
 
-            if seen.insert(guid.clone()) {
+            let key = (guid.clone(), feed_id.clone());
+            if seen.insert(key) {
                 entries.push(FeedLogEntry {
                     guid: guid.clone(),
                     feed_id: feed_id.clone(),
@@ -770,6 +800,12 @@ impl Database {
                 .unwrap_or_default(),
         )
         .await?;
+        Ok(())
+    }
+
+    /// Set only the YouTube API key (used by the Settings UI).
+    pub async fn set_youtube_api_key(&self, api_key: &str) -> Result<()> {
+        self.set_setting("youtube_api_key", api_key).await?;
         Ok(())
     }
 

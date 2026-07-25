@@ -214,21 +214,28 @@ async fn fetch_youtube_channel(
     channel_id: &str,
     max_results: u64,
 ) -> Result<Vec<Post>> {
-    let url = format!(
-        "https://www.googleapis.com/youtube/v3/search?part=snippet&channelId={}&order=date&maxResults={}&type=video&key={}",
-        channel_id, max_results, api_key
+    // Get the channel's uploads playlist ID (consistent, unlike search endpoint)
+    let channel_url = format!(
+        "https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id={}&key={}",
+        channel_id, api_key
     );
 
-    let resp: serde_json::Value = client
-        .get(&url)
+    let channel_resp: serde_json::Value = client
+        .get(&channel_url)
         .send()
         .await
-        .context("Failed to fetch YouTube channel")?
+        .context("Failed to fetch YouTube channel info")?
         .json()
         .await
-        .context("Failed to parse YouTube response")?;
+        .context("Failed to parse YouTube channel response")?;
 
-    parse_youtube_response(resp)
+    let uploads_playlist_id = channel_resp["items"][0]["contentDetails"]["relatedPlaylists"]
+        ["uploads"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Could not find uploads playlist for channel"))?;
+
+    // Fetch from the uploads playlist (deterministic, all uploads in order)
+    fetch_youtube_playlist(client, api_key, uploads_playlist_id, max_results).await
 }
 
 async fn fetch_youtube_playlist(
@@ -289,20 +296,16 @@ fn parse_youtube_response(resp: serde_json::Value) -> Result<Vec<Post>> {
         .iter()
         .filter_map(|item| {
             let snippet = &item["snippet"];
-            let resource = &item["snippet"];
 
             let video_id = item
                 .get("id")
-                .and_then(|id| {
-                    id.get("videoId")
-                        .and_then(|v| v.as_str().map(String::from))
-                        .or_else(|| id.as_str().map(String::from))
-                })
+                .and_then(|id| id.get("videoId").and_then(|v| v.as_str().map(String::from)))
                 .or_else(|| {
-                    resource
+                    snippet
                         .get("resourceId")
                         .and_then(|r| r.get("videoId")?.as_str().map(String::from))
-                })?;
+                })
+                .or_else(|| item.get("id").and_then(|id| id.as_str().map(String::from)))?;
 
             let title = snippet["title"].as_str()?;
             let description = snippet["description"].as_str().map(String::from);

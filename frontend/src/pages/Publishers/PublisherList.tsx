@@ -345,7 +345,7 @@ export default function PublisherList() {
                 rules={[{ required: true, message: "Template is required" }]}
                 extra="Use {{ title }}, {{ description }}, {{ url }} variables"
               >
-                <Input.TextArea rows={3} placeholder="📰 *{{ title }}* - {{ url }}" />
+                <Input.TextArea rows={6} placeholder="📰 *{{ title }}* - {{ url }}" />
               </Form.Item>
         </Form>
       </Modal>

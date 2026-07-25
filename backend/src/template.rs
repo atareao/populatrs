@@ -85,18 +85,8 @@ fn truncate_function(value: Value, length: Value) -> Result<Value, minijinja::Er
         return Ok(Value::from(text));
     }
 
-    let truncated = text.chars().take(max_len).collect::<String>();
-    let result = if truncated.ends_with(' ') {
-        truncated.trim_end().to_string() + "..."
-    } else {
-        if let Some(last_space) = truncated.rfind(' ') {
-            truncated[..last_space].to_string() + "..."
-        } else {
-            truncated + "..."
-        }
-    };
-
-    Ok(Value::from(result))
+    let truncated: String = text.chars().take(max_len).collect();
+    Ok(Value::from(truncated + "..."))
 }
 
 fn word_limit_function(value: Value, limit: Value) -> Result<Value, minijinja::Error> {
