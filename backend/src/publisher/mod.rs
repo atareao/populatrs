@@ -78,12 +78,18 @@ pub fn create_publisher_with_config_path(
         ))),
         PublisherConfig::Mastodon {
             server_url,
+            client_id,
+            client_secret,
             access_token,
+            redirect_uri,
             template,
         } => Ok(Box::new(MastodonPublisher::new(
             id,
             server_url.clone(),
+            client_id.clone(),
+            client_secret.clone(),
             access_token.clone(),
+            redirect_uri.clone(),
             template.clone(),
         ))),
         PublisherConfig::LinkedIn {
@@ -144,13 +150,19 @@ pub fn create_publisher_with_config_path(
             template.clone(),
         ))),
         PublisherConfig::Threads {
+            client_id,
+            client_secret,
             access_token,
             user_id,
+            redirect_uri,
             template,
         } => Ok(Box::new(ThreadsPublisher::new(
             id,
+            client_id.clone(),
+            client_secret.clone(),
             access_token.clone(),
             user_id.clone(),
+            redirect_uri.clone(),
             template.clone(),
         ))),
         PublisherConfig::Discord {

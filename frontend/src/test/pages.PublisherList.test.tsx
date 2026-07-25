@@ -90,7 +90,7 @@ describe("PublisherList", () => {
     expect(screen.getByText("Mastodon")).toBeInTheDocument();
   });
 
-  it("shows enabled toggle for publishers", async () => {
+  it("shows enabled status for all publishers", async () => {
     mockMultiFetch({
       "/api/publishers": { status: 200, body: mockPublishersData },
     });
@@ -100,21 +100,21 @@ describe("PublisherList", () => {
       expect(screen.getByText("telegram")).toBeInTheDocument();
     });
 
-    // All switches should be rendered
-    const switches = screen.getAllByRole("switch");
-    expect(switches.length).toBe(3);
+    // All publishers should show enabled/disabled status
+    expect(screen.getAllByText("✅").length).toBe(2);
+    expect(screen.getByText("❌")).toBeInTheDocument();
   });
 
-  it("shows enabled publisher with switch checked", async () => {
+  it("shows enabled publisher with check emoji", async () => {
     mockMultiFetch({
       "/api/publishers": { status: 200, body: mockPublishersData },
     });
     renderPublisherList();
 
     await waitFor(() => {
-      const switches = screen.getAllByRole("switch");
-      // telegram is enabled
-      expect(switches[0]).toBeChecked();
+      const enabledIndicators = screen.getAllByText("✅");
+      // telegram and x are enabled
+      expect(enabledIndicators.length).toBe(2);
     });
   });
 
