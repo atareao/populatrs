@@ -1,10 +1,22 @@
 # Changelog
+## [0.3.5] - 2026-07-25
+
+### Features
+
+- *(oauth)* Add OAuth flows for Threads and Mastodon publishers
+- Improve publisher UI - replace switches with emojis, hide feed ID column, add test result modals
+- Improve publisher UI and add OAuth flows for Threads/Mastodon
+
+### Other
+
+- V0.4.0
 ## [0.3.4] - 2026-07-23
 
 ### Miscellaneous Tasks
 
 - Use GH_PAT for git push in release-prepare to trigger Release workflow
 - Fix release-prepare to use GH_PAT for git push
+- Release v0.3.4
 ## [0.3.3] - 2026-07-23
 
 ### Bug Fixes
