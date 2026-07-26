@@ -295,8 +295,22 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
                 }
                 match cron::Schedule::from_str(&cron_expr) {
                     Ok(cron_schedule) => {
-                        let now = chrono::Utc::now();
-                        if let Some(next) = cron_schedule.upcoming(chrono::Utc).next() {
+                        let tz_name = &schedule.timezone;
+                        let next_utc = match tz_name.parse::<chrono_tz::Tz>() {
+                            Ok(tz) => cron_schedule
+                                .upcoming(tz)
+                                .next()
+                                .map(|dt| dt.with_timezone(&chrono::Utc)),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "Invalid timezone '{}' — falling back to UTC",
+                                    tz_name
+                                );
+                                cron_schedule.upcoming(chrono::Utc).next()
+                            }
+                        };
+                        if let Some(next) = next_utc {
+                            let now = chrono::Utc::now();
                             {
                                 let mut timing = sched_status.lock().await;
                                 timing.next_run_at = Some(next.to_rfc3339());
@@ -304,7 +318,13 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
                             let duration = (next - now)
                                 .to_std()
                                 .unwrap_or(std::time::Duration::from_secs(60));
-                            tracing::info!("⏰ Next check at {}", next);
+                            // Display next run in configured timezone for readability
+                            if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
+                                let local = next.with_timezone(&tz);
+                                tracing::info!("⏰ Next check at {} ({})", local, tz_name);
+                            } else {
+                                tracing::info!("⏰ Next check at {}", next);
+                            }
                             tokio::time::sleep(duration).await;
                         } else {
                             tracing::warn!("No upcoming cron tick — sleeping 60s");

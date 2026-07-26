@@ -29,6 +29,7 @@ export interface PublisherConfigEntry {
 export interface ScheduleConfig {
   cron_expression: string;
   timezone: string;
+  next_run_at: string | null;
 }
 
 export interface StorageConfig {

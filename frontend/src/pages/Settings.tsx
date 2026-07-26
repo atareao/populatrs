@@ -48,6 +48,7 @@ export default function Settings() {
   const [schedSaving, setSchedSaving] = useState(false)
   const [currentCron, setCurrentCron] = useState<string>("0 * * * *")
   const [currentTimezone, setCurrentTimezone] = useState<string>("UTC")
+  const [nextRunAt, setNextRunAt] = useState<string | null>(null)
   const [ytForm] = Form.useForm()
   const [schedForm] = Form.useForm()
 
@@ -58,6 +59,7 @@ export default function Settings() {
         schedForm.setFieldsValue(d)
         setCurrentCron(d.cron_expression)
         setCurrentTimezone(d.timezone)
+        setNextRunAt(d.next_run_at ?? null)
       }),
     ])
       .catch(() => message.error("Failed to load config"))
@@ -82,6 +84,7 @@ export default function Settings() {
       await updateSchedule(values)
       setCurrentCron(values.cron_expression)
       setCurrentTimezone(values.timezone)
+      setNextRunAt(values.next_run_at ?? null)
       message.success("Schedule updated")
     } catch {
       message.error("Failed to update schedule")
@@ -114,6 +117,11 @@ export default function Settings() {
         <Tag icon={<GlobalOutlined />} style={{ marginBottom: 12 }}>
           {currentTimezone} · {currentCron}
         </Tag>
+        {nextRunAt && (
+          <Tag color="blue" style={{ marginBottom: 12 }}>
+            Next run: {new Date(nextRunAt).toLocaleString()}
+          </Tag>
+        )}
         <Form
           form={schedForm}
           layout="vertical"

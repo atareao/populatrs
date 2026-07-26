@@ -100,10 +100,11 @@ impl ThreadsPublisher {
                 .ok_or_else(|| anyhow::anyhow!("No access_token in response"))?
                 .to_string();
 
-            let user_id = token_data
-                .get("user_id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+            let user_id = token_data.get("user_id").and_then(|v| {
+                v.as_str()
+                    .map(|s| s.to_string())
+                    .or_else(|| v.as_u64().map(|n| n.to_string()))
+            });
 
             let expires_in = token_data["expires_in"].as_u64().unwrap_or(3600);
 
@@ -166,12 +167,12 @@ impl Publisher for ThreadsPublisher {
         let container_payload = json!({
             "media_type": "TEXT",
             "text": text,
-            "access_token": access_token
         });
 
         let container_response = self
             .client
             .post(&container_url)
+            .query(&[("access_token", access_token.as_str())])
             .json(&container_payload)
             .send()
             .await?;
@@ -202,7 +203,6 @@ impl Publisher for ThreadsPublisher {
 
         let publish_payload = json!({
             "creation_id": container_id,
-            "access_token": access_token
         });
 
         tracing::info!("Publishing Threads container: {}", container_id);
@@ -210,6 +210,7 @@ impl Publisher for ThreadsPublisher {
         let publish_response = self
             .client
             .post(&publish_url)
+            .query(&[("access_token", access_token.as_str())])
             .json(&publish_payload)
             .send()
             .await?;
@@ -237,6 +238,7 @@ impl Publisher for ThreadsPublisher {
                 let retry_response = self
                     .client
                     .post(&publish_url)
+                    .query(&[("access_token", access_token.as_str())])
                     .json(&publish_payload)
                     .send()
                     .await?;

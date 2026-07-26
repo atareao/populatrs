@@ -6,7 +6,7 @@ import { ConfigProvider } from "antd";
 import Settings from "../pages/Settings";
 
 const mockYoutube = { api_key: "AIzaSyTest123" };
-const mockSchedule = { cron_expression: "0 */2 * * *", timezone: "Europe/Madrid" };
+const mockSchedule = { cron_expression: "0 */2 * * *", timezone: "Europe/Madrid", next_run_at: "2026-07-26T12:00:00+00:00" };
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({
