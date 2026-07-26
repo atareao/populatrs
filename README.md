@@ -92,17 +92,17 @@ El frontend arranca en `http://localhost:5173` con proxy al backend en `:3044`.
 
 | Variable | Descripción | Por defecto |
 |---|---|---|
-| `HOST` | IP de escucha | `0.0.0.0` |
-| `PORT` | Puerto | `3044` |
-| `DATABASE_URL` | Ruta a SQLite | `./data/populatrs.db` |
-| `DATA_DIR` | Directorio de datos | `./data` |
-| `TIMEZONE` | Zona horaria | `UTC` |
-| `RUST_LOG` | Nivel de log | `info` |
-| `LOG_FORMAT` | Formato de log (`pretty` o `json`) | `pretty` |
-| `OIDC_ISSUER_URL` | URL del issuer OIDC | — |
-| `OIDC_CLIENT_ID` | Client ID OIDC | — |
-| `OIDC_CLIENT_SECRET` | Client secret OIDC | — |
-| `OIDC_REDIRECT_URI` | URL de callback OIDC | `http://localhost:3044/auth/callback` |
+| `HOST` | Dirección IP de escucha del servidor | `0.0.0.0` |
+| `PORT` | Puerto del servidor web | `3044` |
+| `DATABASE_URL` | Ruta al archivo SQLite | `./data/populatrs.db` |
+| `DATA_DIR` | Directorio para datos persistentes (logs, DB) | `./data` |
+| `TIMEZONE` | Zona horaria para el scheduler cron | `UTC` |
+| `RUST_LOG` | Nivel de log (`error`, `warn`, `info`, `debug`, `trace`) | `info` |
+| `LOG_FORMAT` | Formato de salida (`pretty` o `json`) | `pretty` |
+| `OIDC_ISSUER_URL` | URL del issuer OIDC (PocketID). Si se omite, modo desarrollo con auth bypass | — |
+| `OIDC_CLIENT_ID` | Client ID de la aplicación en PocketID | — |
+| `OIDC_CLIENT_SECRET` | Client secret de la aplicación en PocketID | — |
+| `OIDC_REDIRECT_URL` | URL de callback donde PocketID redirige tras login | `http://localhost:3044/auth/callback` |
 
 ### Modos de autenticación
 
