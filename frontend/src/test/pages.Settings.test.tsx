@@ -6,7 +6,7 @@ import { ConfigProvider } from "antd";
 import Settings from "../pages/Settings";
 
 const mockYoutube = { api_key: "AIzaSyTest123" };
-const emptyYoutube = { api_key: "" };
+const mockSchedule = { cron_expression: "0 */2 * * *", timezone: "Europe/Madrid" };
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({
@@ -32,6 +32,18 @@ describe("Settings", () => {
     sessionStorage.clear();
     vi.restoreAllMocks();
     sessionStorage.setItem("populatrs_token", "test-token");
+    // mock both endpoints by default
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve(mockYoutube),
+        text: () => Promise.resolve(JSON.stringify(mockYoutube)),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve(mockSchedule),
+        text: () => Promise.resolve(JSON.stringify(mockSchedule)),
+      });
   });
 
   it("shows loading spinner initially", () => {
@@ -41,7 +53,6 @@ describe("Settings", () => {
   });
 
   it("renders the settings page title", async () => {
-    mockFetch(200, mockYoutube);
     renderSettings();
 
     await waitFor(() => {
@@ -49,27 +60,31 @@ describe("Settings", () => {
     });
   });
 
-  it("loads and displays youtube config section", async () => {
-    mockFetch(200, mockYoutube);
+  it("loads and displays schedule section", async () => {
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText("YouTube Configuration")).toBeInTheDocument();
+      expect(screen.getByText("Schedule")).toBeInTheDocument();
+    });
+    expect(screen.getByDisplayValue(/Europe\/Madrid/)).toBeInTheDocument();
+  });
+
+  it("loads and displays youtube config section", async () => {
+    renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("YouTube API Key")).toBeInTheDocument();
     });
   });
 
   it("saves youtube config on form submit", async () => {
-    mockFetch(200, mockYoutube);
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText("YouTube Configuration")).toBeInTheDocument();
+      expect(screen.getByText("YouTube API Key")).toBeInTheDocument();
     });
 
-    // Mock PUT response
-    mockFetch(200, { status: "ok" });
-
-    const saveBtn = screen.getByRole("button", { name: /save/i });
+    const saveBtn = screen.getByRole("button", { name: /save$/i });
     await userEvent.click(saveBtn);
 
     await waitFor(() => {
@@ -80,8 +95,25 @@ describe("Settings", () => {
     });
   });
 
+  it("saves schedule on form submit", async () => {
+    renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("Schedule")).toBeInTheDocument();
+    });
+
+    const saveBtn = screen.getByRole("button", { name: /save schedule/i });
+    await userEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/schedule",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+  });
+
   it("shows info about youtube api key", async () => {
-    mockFetch(200, emptyYoutube);
     renderSettings();
 
     await waitFor(() => {

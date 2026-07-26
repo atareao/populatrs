@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use populatrs::auth::{AppState, JwtValidator, OidcMetadata};
@@ -5,7 +6,7 @@ use populatrs::config::Config;
 use populatrs::db::Database;
 use populatrs::embed::serve_embedded;
 use populatrs::middleware;
-use populatrs::models::{FeedManager, PublisherManager};
+use populatrs::models::{FeedManager, PublisherManager, SharedSchedulerStatus};
 use populatrs::routes;
 
 use tokio::sync::Mutex;
@@ -126,6 +127,8 @@ async fn main() {
     }
     let publisher_manager = Arc::new(publisher_manager);
 
+    let scheduler_status: SharedSchedulerStatus = Default::default();
+
     let app_state = Arc::new(AppState {
         config: config.clone(),
         db: db.clone(),
@@ -135,13 +138,14 @@ async fn main() {
         oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         log_tx,
         publisher_manager: publisher_manager.clone(),
+        scheduler_status: scheduler_status.clone(),
     });
 
     // ───── Scheduler ─────
     let db_for_scheduler = db.clone();
-    let config_for_scheduler = config.clone();
+    let sched_status = scheduler_status.clone();
     tokio::spawn(async move {
-        feed_scheduler_loop(db_for_scheduler, config_for_scheduler).await;
+        feed_scheduler_loop(db_for_scheduler, sched_status).await;
     });
 
     // ───── Build router ─────
@@ -182,7 +186,7 @@ async fn main() {
 }
 
 /// Periodic feed scheduler loop.
-async fn feed_scheduler_loop(db: Database, config: Config) {
+async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) {
     // Initial delay before first check
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
@@ -233,11 +237,15 @@ async fn feed_scheduler_loop(db: Database, config: Config) {
         );
         let feed_manager = Arc::new(Mutex::new(feed_manager));
 
-        let interval = config.default_interval_minutes;
-        if let Err(e) =
-            populatrs::run_feed_check(feed_manager, publisher_manager, &db, interval, false).await
+        if let Err(e) = populatrs::run_feed_check(feed_manager, publisher_manager, &db, false).await
         {
             tracing::error!("Scheduler feed check error: {}", e);
+        }
+
+        // Update scheduler timing
+        {
+            let mut timing = sched_status.lock().await;
+            timing.last_run_at = Some(chrono::Utc::now().to_rfc3339());
         }
 
         // Clean up old logs based on retention setting
@@ -249,7 +257,68 @@ async fn feed_scheduler_loop(db: Database, config: Config) {
             tracing::error!("Failed to cleanup old publish results: {}", e);
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(interval * 60)).await;
+        // Read schedule and sleep until next cron tick
+        match db.get_schedule().await {
+            Ok(schedule) => {
+                // ponytail: cron crate uses 6-field (seconds, minutes, hours, dom, month, dow)
+                // normalize */N where N > field max to prevent "Minutes must be between 1 and 59" errors
+                let mut cron_expr = if schedule.cron_expression.split_whitespace().count() == 5 {
+                    format!("0 {}", schedule.cron_expression)
+                } else {
+                    schedule.cron_expression.clone()
+                };
+                let field_max = [59, 59, 23, 31, 12, 7];
+                let fields: Vec<&str> = cron_expr.split_whitespace().collect();
+                if fields.len() == 6 {
+                    let normalized: Vec<String> = fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| {
+                            if let Some(rest) = f.strip_prefix("*/") {
+                                if let Ok(n) = rest.parse::<u32>() {
+                                    if n > field_max[i] {
+                                        return "0".to_string();
+                                    }
+                                }
+                            }
+                            f.to_string()
+                        })
+                        .collect();
+                    cron_expr = normalized.join(" ");
+                }
+                match cron::Schedule::from_str(&cron_expr) {
+                    Ok(cron_schedule) => {
+                        let now = chrono::Utc::now();
+                        if let Some(next) = cron_schedule.upcoming(chrono::Utc).next() {
+                            {
+                                let mut timing = sched_status.lock().await;
+                                timing.next_run_at = Some(next.to_rfc3339());
+                            }
+                            let duration = (next - now)
+                                .to_std()
+                                .unwrap_or(std::time::Duration::from_secs(60));
+                            tracing::info!("⏰ Next check at {}", next);
+                            tokio::time::sleep(duration).await;
+                        } else {
+                            tracing::warn!("No upcoming cron tick — sleeping 60s");
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Invalid cron expression '{}': {} — sleeping 60s",
+                            schedule.cron_expression,
+                            e
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to read schedule: {} — sleeping 60s", e);
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+        }
     }
 }
 

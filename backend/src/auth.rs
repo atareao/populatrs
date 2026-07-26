@@ -8,6 +8,7 @@ use tokio::sync::{broadcast, RwLock};
 use crate::config::Config;
 use crate::db::Database;
 use crate::models::PublisherManager;
+use crate::models::SharedSchedulerStatus;
 
 // ───── Log Entry (broadcast via SSE) ─────
 
@@ -158,6 +159,7 @@ pub struct AppState {
     /// Broadcast sender for log entries (SSE to LogsPage).
     pub log_tx: broadcast::Sender<LogEntry>,
     pub publisher_manager: Arc<PublisherManager>,
+    pub scheduler_status: SharedSchedulerStatus,
 }
 
 impl AppState {
@@ -185,6 +187,7 @@ impl AppState {
             oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             log_tx,
             publisher_manager,
+            scheduler_status: Default::default(),
         }
     }
 }
