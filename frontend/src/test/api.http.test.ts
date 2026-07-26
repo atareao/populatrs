@@ -158,7 +158,7 @@ describe("api/http", () => {
   describe("fetchSchedule", () => {
     it("returns schedule config", async () => {
       setToken("t");
-      mockFetch(200, { cron_expression: "*/30 * * * *", timezone: "Europe/Madrid" });
+      mockFetch(200, { cron_expression: "*/30 * * * *", timezone: "Europe/Madrid", next_run_at: "2026-07-26T10:30:00+00:00" });
 
       const schedule = await fetchSchedule();
       expect(schedule.cron_expression).toBe("*/30 * * * *");
@@ -171,7 +171,7 @@ describe("api/http", () => {
       setToken("t");
       mockFetch(204, null);
 
-      await updateSchedule({ cron_expression: "0 * * * *", timezone: "UTC" });
+      await updateSchedule({ cron_expression: "0 * * * *", timezone: "UTC", next_run_at: null });
 
       expect(fetch).toHaveBeenCalledWith("/api/schedule", expect.objectContaining({
         method: "PUT",
@@ -208,7 +208,7 @@ describe("api/http", () => {
       mockFetch(200, {
         feeds: { total: 5, enabled: 3, disabled: 2 },
         publishers: { total: 2 },
-        schedule: { cron_expression: "0 * * * *", timezone: "UTC" },
+        schedule: { cron_expression: "0 * * * *", timezone: "UTC", next_run_at: "2026-07-26T10:00:00+00:00" },
         storage: { data_dir: "./data" },
       });
 

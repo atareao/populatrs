@@ -150,13 +150,20 @@ async fn main() {
 
     // ───── Build router ─────
     let state_for_middleware = app_state.clone();
+
     let app = routes::api_routes()
         .layer(CorsLayer::permissive())
         .layer(axum::middleware::from_fn(
             move |mut req: axum::extract::Request, next: axum::middleware::Next| {
                 let state = state_for_middleware.clone();
                 async move {
+                    let path = req.uri().path().to_string();
+                    // Always insert state (inner require_auth needs it)
                     req.extensions_mut().insert(state);
+                    // Skip auth entirely for public paths / static assets
+                    if is_public_path(&path) {
+                        return Ok(next.run(req).await);
+                    }
                     middleware::require_auth(req, next).await
                 }
             },
@@ -288,8 +295,22 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
                 }
                 match cron::Schedule::from_str(&cron_expr) {
                     Ok(cron_schedule) => {
-                        let now = chrono::Utc::now();
-                        if let Some(next) = cron_schedule.upcoming(chrono::Utc).next() {
+                        let tz_name = &schedule.timezone;
+                        let next_utc = match tz_name.parse::<chrono_tz::Tz>() {
+                            Ok(tz) => cron_schedule
+                                .upcoming(tz)
+                                .next()
+                                .map(|dt| dt.with_timezone(&chrono::Utc)),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "Invalid timezone '{}' — falling back to UTC",
+                                    tz_name
+                                );
+                                cron_schedule.upcoming(chrono::Utc).next()
+                            }
+                        };
+                        if let Some(next) = next_utc {
+                            let now = chrono::Utc::now();
                             {
                                 let mut timing = sched_status.lock().await;
                                 timing.next_run_at = Some(next.to_rfc3339());
@@ -297,7 +318,13 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
                             let duration = (next - now)
                                 .to_std()
                                 .unwrap_or(std::time::Duration::from_secs(60));
-                            tracing::info!("⏰ Next check at {}", next);
+                            // Display next run in configured timezone for readability
+                            if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
+                                let local = next.with_timezone(&tz);
+                                tracing::info!("⏰ Next check at {} ({})", local, tz_name);
+                            } else {
+                                tracing::info!("⏰ Next check at {}", next);
+                            }
                             tokio::time::sleep(duration).await;
                         } else {
                             tracing::warn!("No upcoming cron tick — sleeping 60s");
@@ -322,6 +349,29 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
     }
 }
 
+/// Middleware helper: determines if a request path should bypass authentication.
+/// Public paths (auth endpoints, static assets, health, SPA fallback) are
+/// accessible without a token so the browser can load JS chunks and the login
+/// page before the user authenticates.
+pub(crate) fn is_public_path(path: &str) -> bool {
+    path == "/"
+        || path == "/index.html"
+        || path == "/health"
+        || path.starts_with("/auth/")
+        || path == "/oauth/callback"
+        || path.starts_with("/assets/")
+        || path.ends_with(".html")
+        || path.ends_with(".js")
+        || path.ends_with(".css")
+        || path.ends_with(".png")
+        || path.ends_with(".ico")
+        || path.ends_with(".svg")
+        || path.ends_with(".json")
+        || path.ends_with(".woff2")
+        || path.ends_with(".woff")
+        || path.ends_with(".ttf")
+}
+
 async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c().await.expect("ctrl_c handler");
@@ -338,5 +388,72 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => { tracing::info!("🛑 SIGINT received, shutting down..."); }
         _ = terminate => { tracing::info!("🛑 SIGTERM received, shutting down..."); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_public_path_root() {
+        assert!(is_public_path("/"));
+    }
+
+    #[test]
+    fn test_is_public_path_index_html() {
+        assert!(is_public_path("/index.html"));
+    }
+
+    #[test]
+    fn test_is_public_path_health() {
+        assert!(is_public_path("/health"));
+    }
+
+    #[test]
+    fn test_is_public_path_auth_login() {
+        assert!(is_public_path("/auth/login"));
+    }
+
+    #[test]
+    fn test_is_public_path_auth_callback_with_query() {
+        assert!(is_public_path("/auth/callback?code=xxx"));
+    }
+
+    #[test]
+    fn test_is_public_path_oauth_callback() {
+        assert!(is_public_path("/oauth/callback"));
+    }
+
+    #[test]
+    fn test_is_public_path_asset_with_hash() {
+        assert!(is_public_path("/assets/main-abc123.js"));
+    }
+
+    #[test]
+    fn test_is_public_path_favicon_ico() {
+        assert!(is_public_path("/favicon.ico"));
+    }
+
+    #[test]
+    fn test_is_public_path_api_feeds_requires_auth() {
+        assert!(!is_public_path("/api/feeds"));
+    }
+
+    #[test]
+    fn test_is_public_path_api_publishers_requires_auth() {
+        assert!(!is_public_path("/api/publishers"));
+    }
+
+    #[test]
+    fn test_is_public_path_file_extensions() {
+        assert!(is_public_path("/static/style.css"));
+        assert!(is_public_path("/static/app.js"));
+        assert!(is_public_path("/static/image.png"));
+        assert!(is_public_path("/static/font.woff2"));
+        assert!(is_public_path("/static/font.woff"));
+        assert!(is_public_path("/static/font.ttf"));
+        assert!(is_public_path("/static/icon.svg"));
+        assert!(is_public_path("/static/data.json"));
     }
 }

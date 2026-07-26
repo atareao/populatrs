@@ -61,6 +61,7 @@ md5 = "0.8"
 
 # Time & scheduling
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 cron = "0.15"
 
 # General
