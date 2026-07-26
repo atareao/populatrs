@@ -173,8 +173,7 @@ sudo cp target/release/populatrs /usr/local/bin/
       "config": { "url": "https://myblog.com/feed.xml" },
       "name": "My Blog",
       "enabled": true,
-      "publishers": ["telegram-main", "x-main"],
-      "check_interval_minutes": 30
+      "publishers": ["telegram-main", "x-main"]
     },
     {
       "id": "my-youtube",
@@ -182,8 +181,7 @@ sudo cp target/release/populatrs /usr/local/bin/
       "config": { "channel_id": "UCChannelID123" },
       "name": "My YouTube Channel",
       "enabled": true,
-      "publishers": ["linkedin-main"],
-      "check_interval_minutes": 60
+      "publishers": ["linkedin-main"]
     }
   ],
   "publishers": {
@@ -197,7 +195,7 @@ sudo cp target/release/populatrs /usr/local/bin/
     }
   },
   "schedule": {
-    "default_interval_minutes": 60,
+    "cron_expression": "0 * * * *",
     "timezone": "UTC"
   },
   "storage": {

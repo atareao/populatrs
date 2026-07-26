@@ -742,28 +742,43 @@ impl Database {
 
     /// Get schedule configuration (from settings table).
     pub async fn get_schedule(&self) -> Result<ScheduleConfig> {
-        let interval = self
-            .get_setting("schedule_interval")
-            .await?
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(60);
-        let timezone = self
-            .get_setting("schedule_timezone")
-            .await?
-            .unwrap_or_else(|| "UTC".to_string());
-        Ok(ScheduleConfig {
-            default_interval_minutes: interval,
-            timezone,
-        })
+        // Try new key first
+        let cron = self.get_setting("schedule_cron").await?;
+        match cron {
+            Some(expr) => Ok(ScheduleConfig {
+                cron_expression: expr,
+                timezone: self
+                    .get_setting("schedule_timezone")
+                    .await?
+                    .unwrap_or_else(|| "UTC".to_string()),
+            }),
+            None => {
+                // Migration from old interval-based schedule
+                let old_interval = self
+                    .get_setting("schedule_interval")
+                    .await?
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(60);
+                let cron_expr = format!("*/{} * * * *", old_interval.min(59));
+                let timezone = self
+                    .get_setting("schedule_timezone")
+                    .await?
+                    .unwrap_or_else(|| "UTC".to_string());
+                // Save new format
+                let config = ScheduleConfig {
+                    cron_expression: cron_expr,
+                    timezone,
+                };
+                self.set_schedule(&config).await?;
+                Ok(config)
+            }
+        }
     }
 
     /// Update schedule configuration.
     pub async fn set_schedule(&self, schedule: &ScheduleConfig) -> Result<()> {
-        self.set_setting(
-            "schedule_interval",
-            &schedule.default_interval_minutes.to_string(),
-        )
-        .await?;
+        self.set_setting("schedule_cron", &schedule.cron_expression)
+            .await?;
         self.set_setting("schedule_timezone", &schedule.timezone)
             .await?;
         Ok(())
@@ -829,16 +844,15 @@ impl Database {
         // ⚠️ Inline schedule queries while holding the lock to avoid deadlock.
         //    Do NOT call self.get_schedule() here — it would try to re-acquire
         //    the same tokio::sync::Mutex, which is not reentrant.
-        let interval: i64 = conn
+        let cron_expression: String = conn
             .query_row(
-                "SELECT value FROM settings WHERE key = 'schedule_interval'",
+                "SELECT value FROM settings WHERE key = 'schedule_cron'",
                 [],
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .context("Failed to query schedule_interval")?
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(60);
+            .context("Failed to query schedule_cron")?
+            .unwrap_or_else(|| "0 * * * *".to_string());
         let timezone: String = conn
             .query_row(
                 "SELECT value FROM settings WHERE key = 'schedule_timezone'",
@@ -855,7 +869,7 @@ impl Database {
             total_publishers: total_publishers as u64,
             total_published: total_published as u64,
             schedule: ScheduleConfig {
-                default_interval_minutes: interval as u64,
+                cron_expression,
                 timezone,
             },
         })
@@ -1020,12 +1034,12 @@ mod tests {
     async fn test_schedule() {
         let (db, _dir) = test_db().await;
         let sched = ScheduleConfig {
-            default_interval_minutes: 30,
+            cron_expression: "0 */2 * * *".to_string(),
             timezone: "Europe/Madrid".into(),
         };
         db.set_schedule(&sched).await.unwrap();
         let loaded = db.get_schedule().await.unwrap();
-        assert_eq!(loaded.default_interval_minutes, 30);
+        assert_eq!(loaded.cron_expression, "0 */2 * * *");
         assert_eq!(loaded.timezone, "Europe/Madrid");
     }
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 // Re-export template types used by publishers
 pub use crate::template::{TemplateContext, TemplateRenderer};
@@ -23,7 +25,7 @@ pub struct YouTubeGlobalConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduleConfig {
-    pub default_interval_minutes: u64,
+    pub cron_expression: String,
     pub timezone: String,
 }
 
@@ -39,7 +41,7 @@ impl Default for AppConfig {
             publishers: HashMap::new(),
             youtube: None,
             schedule: ScheduleConfig {
-                default_interval_minutes: 60,
+                cron_expression: "0 * * * *".to_string(),
                 timezone: "UTC".to_string(),
             },
             storage: StorageConfig {
@@ -349,10 +351,7 @@ impl FeedManager {
         self.cache.clone()
     }
 
-    pub async fn check_all_feeds(
-        &mut self,
-        _default_interval_minutes: u64,
-    ) -> Vec<(String, anyhow::Result<Vec<Post>>)> {
+    pub async fn check_all_feeds(&mut self) -> Vec<(String, anyhow::Result<Vec<Post>>)> {
         let mut results = Vec::new();
         for feed_config in &self.feeds {
             if !feed_config.enabled {
@@ -383,6 +382,16 @@ impl Default for FeedManager {
 // ───── PublisherManager (re-export) ─────
 
 pub use crate::publisher::PublisherManager;
+
+// ───── Scheduler timing (shared between scheduler and status route) ─────
+
+#[derive(Debug, Clone, Default)]
+pub struct SchedulerStatus {
+    pub last_run_at: Option<String>,
+    pub next_run_at: Option<String>,
+}
+
+pub type SharedSchedulerStatus = Arc<Mutex<SchedulerStatus>>;
 
 // ───── Feed Logs (history for LogsPage) ─────
 

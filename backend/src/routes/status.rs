@@ -8,6 +8,11 @@ use crate::routes::storage::StorageConfig;
 
 /// Dashboard status: summary of feeds, publishers, schedule & storage.
 pub async fn dashboard(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let sched_timing = state.scheduler_status.lock().await;
+    let last_run_at = sched_timing.last_run_at.clone();
+    let next_run_at = sched_timing.next_run_at.clone();
+    drop(sched_timing);
+
     match state.db.get_stats().await {
         Ok(stats) => {
             let storage = StorageConfig {
@@ -24,10 +29,12 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Json<serde_json::V
                 },
                 "published_posts": stats.total_published,
                 "schedule": {
-                    "interval_minutes": stats.schedule.default_interval_minutes,
+                    "cron_expression": stats.schedule.cron_expression,
                     "timezone": stats.schedule.timezone
                 },
-                "storage": storage
+                "storage": storage,
+                "last_run_at": last_run_at,
+                "next_run_at": next_run_at
             }))
         }
         Err(e) => Json(json!({
@@ -35,8 +42,10 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Json<serde_json::V
             "feeds": { "total": 0, "enabled": 0, "disabled": 0 },
             "publishers": { "total": 0 },
             "published_posts": 0,
-            "schedule": { "interval_minutes": 60, "timezone": "UTC" },
-            "storage": { "data_dir": "./data" }
+            "schedule": { "cron_expression": "0 * * * *", "timezone": "UTC" },
+            "storage": { "data_dir": "./data" },
+            "last_run_at": null,
+            "next_run_at": null
         })),
     }
 }

@@ -12,7 +12,7 @@ pub async fn get(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> 
         Ok(schedule) => Json(json!(schedule)),
         Err(e) => Json(json!({
             "error": format!("Failed to get schedule: {e}"),
-            "default_interval_minutes": 60,
+            "cron_expression": "0 * * * *",
             "timezone": "UTC"
         })),
     }

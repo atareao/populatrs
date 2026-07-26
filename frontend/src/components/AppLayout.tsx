@@ -1,12 +1,14 @@
-import { Layout, Button, Typography, Space, Menu } from "antd";
+import { useState } from "react";
+import { Layout, Button, Typography, Menu } from "antd";
 import {
   DashboardOutlined,
   RocketOutlined,
   TeamOutlined,
-  ScheduleOutlined,
   SettingOutlined,
   LogoutOutlined,
   FileTextOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { clearToken } from "../store/auth";
@@ -18,14 +20,14 @@ const menuItems = [
   { key: "/", icon: <DashboardOutlined />, label: "Dashboard" },
   { key: "/feeds", icon: <RocketOutlined />, label: "Feeds" },
   { key: "/publishers", icon: <TeamOutlined />, label: "Publishers" },
-  { key: "/schedule", icon: <ScheduleOutlined />, label: "Schedule" },
-  { key: "/settings", icon: <SettingOutlined />, label: "Settings" },
   { key: "/logs", icon: <FileTextOutlined />, label: "Logs" },
+  { key: "/settings", icon: <SettingOutlined />, label: "Settings" },
 ];
 
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
 
   const handleLogout = () => {
     clearToken();
@@ -36,6 +38,11 @@ export default function AppLayout() {
     <Layout style={{ minHeight: "100vh" }}>
       <Sider
         width={220}
+        collapsedWidth={64}
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        trigger={null}
         style={{
           borderRight: "1px solid #1e1e2e",
           position: "sticky",
@@ -43,13 +50,18 @@ export default function AppLayout() {
           height: "100vh",
         }}
       >
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e1e2e" }}>
-          <Text className="logo-text" style={{ fontSize: 20, fontWeight: 700 }}>
-            populatrs
-          </Text>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e1e2e", display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between" }}>
+          {!collapsed && <Text className="logo-text" style={{ fontSize: 20, fontWeight: 700 }}>populatrs</Text>}
+          <Button
+            type="text"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setCollapsed(!collapsed)}
+            style={{ color: "#9494a8", border: "none", padding: 4, minWidth: "auto", height: "auto" }}
+          />
         </div>
         <Menu
           mode="inline"
+          inlineCollapsed={collapsed}
           selectedKeys={[location.pathname]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
@@ -62,7 +74,7 @@ export default function AppLayout() {
             onClick={handleLogout}
             style={{ color: "#9494a8", width: "100%", justifyContent: "flex-start" }}
           >
-            Cerrar sesión
+            {!collapsed && "Cerrar sesión"}
           </Button>
         </div>
       </Sider>

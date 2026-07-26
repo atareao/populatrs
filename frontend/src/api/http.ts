@@ -27,7 +27,7 @@ export interface PublisherConfigEntry {
 }
 
 export interface ScheduleConfig {
-  default_interval_minutes: number;
+  cron_expression: string;
   timezone: string;
 }
 
@@ -39,8 +39,10 @@ export interface DashboardStatus {
   feeds: { total: number; enabled: number; disabled: number };
   publishers: { total: number };
   published_posts: number;
-  schedule: { interval_minutes: number; timezone: string };
+  schedule: { cron_expression: string; timezone: string };
   storage: { data_dir: string };
+  last_run_at: string | null;
+  next_run_at: string | null;
 }
 
 import { getToken } from "../store/auth";

@@ -8,8 +8,10 @@ const mockStatus = {
   feeds: { total: 10, enabled: 7, disabled: 3 },
   publishers: { total: 4 },
   published_posts: 128,
-  schedule: { interval_minutes: 60, timezone: "Europe/Madrid" },
+  schedule: { cron_expression: "0 * * * *", timezone: "Europe/Madrid" },
   storage: { data_dir: "./data" },
+  last_run_at: "2026-07-25T20:00:16+00:00",
+  next_run_at: "2026-07-25T21:00:00+00:00",
 };
 
 function mockFetch(status: number, body: unknown) {
@@ -85,7 +87,7 @@ describe("Dashboard", () => {
       expect(screen.getByText("Schedule")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("60 min")).toBeInTheDocument();
+    expect(screen.getByText("0 * * * *")).toBeInTheDocument();
     expect(screen.getByText("Europe/Madrid")).toBeInTheDocument();
   });
 
@@ -114,8 +116,10 @@ describe("Dashboard", () => {
       feeds: { total: 0, enabled: 0, disabled: 0 },
       publishers: { total: 0 },
       published_posts: 0,
-      schedule: { interval_minutes: 60, timezone: "UTC" },
+      schedule: { cron_expression: "0 * * * *", timezone: "UTC" },
       storage: { data_dir: "./data" },
+      last_run_at: null,
+      next_run_at: null,
     });
     renderDashboard();
 

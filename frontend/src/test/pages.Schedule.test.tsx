@@ -22,7 +22,7 @@ vi.mock("antd", async () => {
 });
 
 const mockSchedule = {
-  default_interval_minutes: 30,
+  cron_expression: "*/30 * * * *",
   timezone: "Europe/Madrid",
 };
 
@@ -75,7 +75,7 @@ describe("Schedule", () => {
       expect(screen.getByText("Current Configuration")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("30 minutes")).toBeInTheDocument();
+    expect(screen.getByText("*/30 * * * *")).toBeInTheDocument();
     expect(screen.getByText("Europe/Madrid")).toBeInTheDocument();
   });
 
@@ -87,8 +87,8 @@ describe("Schedule", () => {
       expect(screen.getByText("Edit Schedule")).toBeInTheDocument();
     });
 
-    const intervalInput = screen.getByRole("spinbutton");
-    expect(intervalInput).toHaveValue("30");
+    const cronInput = screen.getByRole("textbox", { name: /cron/i });
+    expect(cronInput).toHaveValue("*/30 * * * *");
   });
 
   it("saves updated schedule on form submit", async () => {
@@ -102,9 +102,9 @@ describe("Schedule", () => {
     // Mock the PUT response
     mockFetch(200, { status: "ok" });
 
-    const intervalInput = screen.getByRole("spinbutton");
-    await userEvent.clear(intervalInput);
-    await userEvent.type(intervalInput, "45");
+    const cronInput = screen.getByRole("textbox", { name: /cron/i });
+    await userEvent.clear(cronInput);
+    await userEvent.type(cronInput, "0 */2 * * *");
 
     const saveBtn = screen.getByRole("button", { name: /save changes/i });
     await userEvent.click(saveBtn);

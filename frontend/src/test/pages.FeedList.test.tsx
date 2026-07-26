@@ -7,8 +7,8 @@ import FeedList from "../pages/Feeds/FeedList";
 
 const mockFeeds = {
   feeds: [
-    { id: "blog", name: "My Blog", type: "Rss", enabled: true, publishers: ["telegram"], config: { url: "https://blog.com/feed.xml" }, check_interval_minutes: 60 },
-    { id: "youtube", name: "My Channel", type: "Youtube", enabled: false, publishers: [], config: { channel_id: "UC123" }, check_interval_minutes: null },
+    { id: "blog", name: "My Blog", type: "Rss", enabled: true, publishers: ["telegram"], config: { url: "https://blog.com/feed.xml" } },
+    { id: "youtube", name: "My Channel", type: "Youtube", enabled: false, publishers: [], config: { channel_id: "UC123" } },
   ],
   total: 2,
 };
