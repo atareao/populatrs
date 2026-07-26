@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Card, Typography, Divider } from "antd";
+import { Button, Card, Typography, Divider, Image } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
 import { getToken } from "../store/auth";
 
@@ -30,6 +30,12 @@ export default function LoginPage() {
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", background: "#08080e" }}>
       <Card style={{ width: 400, textAlign: "center" }}>
+        <Image
+          src="/icono-192x192.png"
+          width={96}
+          preview={false}
+          style={{ display: "block", margin: "0 auto 12px" }}
+        />
         <Title level={2} className="logo-text">populatrs</Title>
         <Text type="secondary">Automatic RSS feed publisher</Text>
         <Divider />
