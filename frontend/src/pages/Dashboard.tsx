@@ -1,23 +1,37 @@
 import { useEffect, useState } from "react";
 import { Card, Col, Row, Statistic, Typography, Spin, Descriptions, Tag } from "antd";
 import {
-  RocketOutlined, TeamOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  ClockCircleOutlined, GlobalOutlined, DatabaseOutlined, FileTextOutlined,
-  InboxOutlined,
+  RocketOutlined, TeamOutlined, CloseCircleOutlined,
+  ClockCircleOutlined, GlobalOutlined, DatabaseOutlined,
+  InboxOutlined, FieldTimeOutlined, CalendarOutlined,
 } from "@ant-design/icons";
 import { fetchStatus, type DashboardStatus } from "../api/http";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+
+dayjs.extend(relativeTime);
 
 const { Title } = Typography;
+
+function formatTime(iso: string | null): string {
+  if (!iso) return "—";
+  const d = dayjs(iso);
+  return `${d.fromNow()} (${d.format("HH:mm:ss")})`;
+}
 
 export default function Dashboard() {
   const [status, setStatus] = useState<DashboardStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchStatus()
-      .then(setStatus)
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    const load = () =>
+      fetchStatus()
+        .then(setStatus)
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    load();
+    const interval = setInterval(load, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) return <div style={{ textAlign: "center", padding: 40 }}><Spin size="large" data-testid="spinner" /></div>;
@@ -68,13 +82,31 @@ export default function Dashboard() {
         </Col>
       </Row>
 
-      {/* ── Schedule ── */}
+      {/* ── Scheduler timing ── */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} sm={12}>
+          <Card title={<><FieldTimeOutlined /> Última ejecución</>}>
+            <Title level={4} style={{ margin: 0, color: "#22c55e" }}>
+              {formatTime(status.last_run_at)}
+            </Title>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12}>
+          <Card title={<><CalendarOutlined /> Próxima ejecución</>}>
+            <Title level={4} style={{ margin: 0, color: "#60a5fa" }}>
+              {formatTime(status.next_run_at)}
+            </Title>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* ── Schedule & Storage ── */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} md={12}>
           <Card title={<><ClockCircleOutlined /> Schedule</>}>
             <Descriptions column={1} size="small">
-              <Descriptions.Item label="Intervalo">
-                {status.schedule.interval_minutes} min
+              <Descriptions.Item label="Cron">
+                {status.schedule.cron_expression}
               </Descriptions.Item>
               <Descriptions.Item label="Zona Horaria">
                 <Tag icon={<GlobalOutlined />}>{status.schedule.timezone}</Tag>

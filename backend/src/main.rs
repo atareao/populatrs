@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use populatrs::auth::{AppState, JwtValidator, OidcMetadata};
@@ -5,7 +6,7 @@ use populatrs::config::Config;
 use populatrs::db::Database;
 use populatrs::embed::serve_embedded;
 use populatrs::middleware;
-use populatrs::models::{FeedManager, PublisherManager};
+use populatrs::models::{FeedManager, PublisherManager, SharedSchedulerStatus};
 use populatrs::routes;
 
 use tokio::sync::Mutex;
@@ -113,6 +114,21 @@ async fn main() {
         Arc::new(JwtValidator::dev())
     };
 
+    // ───── Publisher Manager (shared) ─────
+    let publishers = db.list_publishers().await.unwrap_or_default();
+    let mut publisher_manager = PublisherManager::new();
+    for (id, (pub_config, enabled)) in &publishers {
+        if !enabled {
+            continue;
+        }
+        if let Err(e) = publisher_manager.add_publisher(id.clone(), pub_config) {
+            tracing::error!("Failed to initialize publisher {}: {}", id, e);
+        }
+    }
+    let publisher_manager = Arc::new(publisher_manager);
+
+    let scheduler_status: SharedSchedulerStatus = Default::default();
+
     let app_state = Arc::new(AppState {
         config: config.clone(),
         db: db.clone(),
@@ -121,24 +137,33 @@ async fn main() {
         oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         log_tx,
+        publisher_manager: publisher_manager.clone(),
+        scheduler_status: scheduler_status.clone(),
     });
 
     // ───── Scheduler ─────
     let db_for_scheduler = db.clone();
-    let config_for_scheduler = config.clone();
+    let sched_status = scheduler_status.clone();
     tokio::spawn(async move {
-        feed_scheduler_loop(db_for_scheduler, config_for_scheduler).await;
+        feed_scheduler_loop(db_for_scheduler, sched_status).await;
     });
 
     // ───── Build router ─────
     let state_for_middleware = app_state.clone();
+
     let app = routes::api_routes()
         .layer(CorsLayer::permissive())
         .layer(axum::middleware::from_fn(
             move |mut req: axum::extract::Request, next: axum::middleware::Next| {
                 let state = state_for_middleware.clone();
                 async move {
+                    let path = req.uri().path().to_string();
+                    // Always insert state (inner require_auth needs it)
                     req.extensions_mut().insert(state);
+                    // Skip auth entirely for public paths / static assets
+                    if is_public_path(&path) {
+                        return Ok(next.run(req).await);
+                    }
                     middleware::require_auth(req, next).await
                 }
             },
@@ -168,7 +193,7 @@ async fn main() {
 }
 
 /// Periodic feed scheduler loop.
-async fn feed_scheduler_loop(db: Database, config: Config) {
+async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) {
     // Initial delay before first check
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
@@ -219,11 +244,15 @@ async fn feed_scheduler_loop(db: Database, config: Config) {
         );
         let feed_manager = Arc::new(Mutex::new(feed_manager));
 
-        let interval = config.default_interval_minutes;
-        if let Err(e) =
-            populatrs::run_feed_check(feed_manager, publisher_manager, &db, interval, false).await
+        if let Err(e) = populatrs::run_feed_check(feed_manager, publisher_manager, &db, false).await
         {
             tracing::error!("Scheduler feed check error: {}", e);
+        }
+
+        // Update scheduler timing
+        {
+            let mut timing = sched_status.lock().await;
+            timing.last_run_at = Some(chrono::Utc::now().to_rfc3339());
         }
 
         // Clean up old logs based on retention setting
@@ -235,8 +264,112 @@ async fn feed_scheduler_loop(db: Database, config: Config) {
             tracing::error!("Failed to cleanup old publish results: {}", e);
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(interval * 60)).await;
+        // Read schedule and sleep until next cron tick
+        match db.get_schedule().await {
+            Ok(schedule) => {
+                // ponytail: cron crate uses 6-field (seconds, minutes, hours, dom, month, dow)
+                // normalize */N where N > field max to prevent "Minutes must be between 1 and 59" errors
+                let mut cron_expr = if schedule.cron_expression.split_whitespace().count() == 5 {
+                    format!("0 {}", schedule.cron_expression)
+                } else {
+                    schedule.cron_expression.clone()
+                };
+                let field_max = [59, 59, 23, 31, 12, 7];
+                let fields: Vec<&str> = cron_expr.split_whitespace().collect();
+                if fields.len() == 6 {
+                    let normalized: Vec<String> = fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| {
+                            if let Some(rest) = f.strip_prefix("*/") {
+                                if let Ok(n) = rest.parse::<u32>() {
+                                    if n > field_max[i] {
+                                        return "0".to_string();
+                                    }
+                                }
+                            }
+                            f.to_string()
+                        })
+                        .collect();
+                    cron_expr = normalized.join(" ");
+                }
+                match cron::Schedule::from_str(&cron_expr) {
+                    Ok(cron_schedule) => {
+                        let tz_name = &schedule.timezone;
+                        let next_utc = match tz_name.parse::<chrono_tz::Tz>() {
+                            Ok(tz) => cron_schedule
+                                .upcoming(tz)
+                                .next()
+                                .map(|dt| dt.with_timezone(&chrono::Utc)),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "Invalid timezone '{}' — falling back to UTC",
+                                    tz_name
+                                );
+                                cron_schedule.upcoming(chrono::Utc).next()
+                            }
+                        };
+                        if let Some(next) = next_utc {
+                            let now = chrono::Utc::now();
+                            {
+                                let mut timing = sched_status.lock().await;
+                                timing.next_run_at = Some(next.to_rfc3339());
+                            }
+                            let duration = (next - now)
+                                .to_std()
+                                .unwrap_or(std::time::Duration::from_secs(60));
+                            // Display next run in configured timezone for readability
+                            if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
+                                let local = next.with_timezone(&tz);
+                                tracing::info!("⏰ Next check at {} ({})", local, tz_name);
+                            } else {
+                                tracing::info!("⏰ Next check at {}", next);
+                            }
+                            tokio::time::sleep(duration).await;
+                        } else {
+                            tracing::warn!("No upcoming cron tick — sleeping 60s");
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Invalid cron expression '{}': {} — sleeping 60s",
+                            schedule.cron_expression,
+                            e
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to read schedule: {} — sleeping 60s", e);
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+        }
     }
+}
+
+/// Middleware helper: determines if a request path should bypass authentication.
+/// Public paths (auth endpoints, static assets, health, SPA fallback) are
+/// accessible without a token so the browser can load JS chunks and the login
+/// page before the user authenticates.
+pub(crate) fn is_public_path(path: &str) -> bool {
+    path == "/"
+        || path == "/index.html"
+        || path == "/health"
+        || path.starts_with("/auth/")
+        || path == "/oauth/callback"
+        || path.starts_with("/assets/")
+        || path.ends_with(".html")
+        || path.ends_with(".js")
+        || path.ends_with(".css")
+        || path.ends_with(".png")
+        || path.ends_with(".ico")
+        || path.ends_with(".svg")
+        || path.ends_with(".json")
+        || path.ends_with(".woff2")
+        || path.ends_with(".woff")
+        || path.ends_with(".ttf")
 }
 
 async fn shutdown_signal() {
@@ -255,5 +388,72 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => { tracing::info!("🛑 SIGINT received, shutting down..."); }
         _ = terminate => { tracing::info!("🛑 SIGTERM received, shutting down..."); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_public_path_root() {
+        assert!(is_public_path("/"));
+    }
+
+    #[test]
+    fn test_is_public_path_index_html() {
+        assert!(is_public_path("/index.html"));
+    }
+
+    #[test]
+    fn test_is_public_path_health() {
+        assert!(is_public_path("/health"));
+    }
+
+    #[test]
+    fn test_is_public_path_auth_login() {
+        assert!(is_public_path("/auth/login"));
+    }
+
+    #[test]
+    fn test_is_public_path_auth_callback_with_query() {
+        assert!(is_public_path("/auth/callback?code=xxx"));
+    }
+
+    #[test]
+    fn test_is_public_path_oauth_callback() {
+        assert!(is_public_path("/oauth/callback"));
+    }
+
+    #[test]
+    fn test_is_public_path_asset_with_hash() {
+        assert!(is_public_path("/assets/main-abc123.js"));
+    }
+
+    #[test]
+    fn test_is_public_path_favicon_ico() {
+        assert!(is_public_path("/favicon.ico"));
+    }
+
+    #[test]
+    fn test_is_public_path_api_feeds_requires_auth() {
+        assert!(!is_public_path("/api/feeds"));
+    }
+
+    #[test]
+    fn test_is_public_path_api_publishers_requires_auth() {
+        assert!(!is_public_path("/api/publishers"));
+    }
+
+    #[test]
+    fn test_is_public_path_file_extensions() {
+        assert!(is_public_path("/static/style.css"));
+        assert!(is_public_path("/static/app.js"));
+        assert!(is_public_path("/static/image.png"));
+        assert!(is_public_path("/static/font.woff2"));
+        assert!(is_public_path("/static/font.woff"));
+        assert!(is_public_path("/static/font.ttf"));
+        assert!(is_public_path("/static/icon.svg"));
+        assert!(is_public_path("/static/data.json"));
     }
 }

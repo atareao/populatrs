@@ -1,84 +1,225 @@
-import { useEffect, useState } from "react";
-import { Card, Form, Input, Button, Typography, message, Spin, Descriptions, Alert } from "antd";
-import { DatabaseOutlined, SaveOutlined, InfoCircleOutlined, FolderOutlined } from "@ant-design/icons";
-import { fetchStorage, updateStorage, type StorageConfig } from "../api/http";
+import { useEffect, useState } from "react"
+import {
+  Card,
+  Form,
+  Input,
+  Select,
+  Button,
+  Typography,
+  message,
+  Spin,
+  Alert,
+  Tag,
+} from "antd"
+import {
+  SaveOutlined,
+  InfoCircleOutlined,
+  YoutubeOutlined,
+  ClockCircleOutlined,
+  GlobalOutlined,
+  LinkOutlined,
+} from "@ant-design/icons"
+import {
+  fetchYoutubeConfig,
+  updateYoutubeConfig,
+  fetchSchedule,
+  updateSchedule,
+  type ScheduleConfig,
+} from "../api/http"
 
-const { Title } = Typography;
+const { Title } = Typography
+
+export const CRON_PRESETS = [
+  { label: "Every 5 minutes", value: "*/5 * * * *" },
+  { label: "Every 15 minutes", value: "*/15 * * * *" },
+  { label: "Every 30 minutes", value: "*/30 * * * *" },
+  { label: "Every hour", value: "0 * * * *" },
+  { label: "Every 6 hours", value: "0 */6 * * *" },
+  { label: "Daily at 06:00", value: "0 6 * * *" },
+  { label: "Daily at 06:00, 10:00, 12:00", value: "0 6,10,12 * * *" },
+  { label: "Daily at 6:05, 10:05, 18:05", value: "5 6,10,18 * * *" },
+  { label: "Daily at 10:05, 18:05", value: "5 10,18 * * *" },
+  { label: "Daily at 22:00", value: "0 22 * * *" },
+]
 
 export default function Settings() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [currentDataDir, setCurrentDataDir] = useState<string>("");
-  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(true)
+  const [ytSaving, setYtSaving] = useState(false)
+  const [schedSaving, setSchedSaving] = useState(false)
+  const [currentCron, setCurrentCron] = useState<string>("0 * * * *")
+  const [currentTimezone, setCurrentTimezone] = useState<string>("UTC")
+  const [nextRunAt, setNextRunAt] = useState<string | null>(null)
+  const [ytForm] = Form.useForm()
+  const [schedForm] = Form.useForm()
 
   useEffect(() => {
-    fetchStorage()
-      .then((data) => {
-        form.setFieldsValue(data);
-        setCurrentDataDir(data.data_dir);
-      })
-      .catch(() => message.error("Failed to load storage config"))
-      .finally(() => setLoading(false));
-  }, [form]);
+    Promise.all([
+      fetchYoutubeConfig().then((d) => ytForm.setFieldsValue(d)),
+      fetchSchedule().then((d) => {
+        schedForm.setFieldsValue(d)
+        setCurrentCron(d.cron_expression)
+        setCurrentTimezone(d.timezone)
+        setNextRunAt(d.next_run_at ?? null)
+      }),
+    ])
+      .catch(() => message.error("Failed to load config"))
+      .finally(() => setLoading(false))
+  }, [ytForm, schedForm])
 
-  const handleSubmit = async (values: StorageConfig) => {
-    setSaving(true);
+  const handleYtSubmit = async (values: { api_key: string }) => {
+    setYtSaving(true)
     try {
-      await updateStorage(values);
-      setCurrentDataDir(values.data_dir);
-      message.success("Storage config saved");
+      await updateYoutubeConfig(values)
+      message.success("YouTube config saved")
     } catch {
-      message.error("Failed to save storage config");
+      message.error("Failed to save YouTube config")
     } finally {
-      setSaving(false);
+      setYtSaving(false)
     }
-  };
+  }
 
-  if (loading) return <div style={{ textAlign: "center", padding: 40 }}><Spin size="large" data-testid="spinner" /></div>;
+  const handleSchedSubmit = async (values: ScheduleConfig) => {
+    setSchedSaving(true)
+    try {
+      await updateSchedule(values)
+      setCurrentCron(values.cron_expression)
+      setCurrentTimezone(values.timezone)
+      setNextRunAt(values.next_run_at ?? null)
+      message.success("Schedule updated")
+    } catch {
+      message.error("Failed to update schedule")
+    } finally {
+      setSchedSaving(false)
+    }
+  }
+
+  if (loading)
+    return (
+      <div style={{ textAlign: "center", padding: 40 }}>
+        <Spin size="large" data-testid="spinner" />
+      </div>
+    )
 
   return (
     <div className="fade-in-up">
       <Title level={3}>
-        <DatabaseOutlined /> Settings
+        <YoutubeOutlined /> Settings
       </Title>
 
-      {/* Current configuration */}
-      <Card style={{ marginBottom: 16, maxWidth: 600 }}>
-        <Descriptions title="Current Configuration" column={1} size="small">
-          <Descriptions.Item label={<><FolderOutlined /> Data Directory</>}>
-            <code>{currentDataDir}</code>
-          </Descriptions.Item>
-        </Descriptions>
+      <Card
+        title={
+          <>
+            <ClockCircleOutlined /> Schedule
+          </>
+        }
+        style={{ maxWidth: 600, marginBottom: 16 }}
+      >
+        <Tag icon={<GlobalOutlined />} style={{ marginBottom: 12 }}>
+          {currentTimezone} · {currentCron}
+        </Tag>
+        {nextRunAt && (
+          <Tag color="blue" style={{ marginBottom: 12 }}>
+            Next run: {new Date(nextRunAt).toLocaleString()}
+          </Tag>
+        )}
+        <Form
+          form={schedForm}
+          layout="vertical"
+          onFinish={handleSchedSubmit}
+          initialValues={{ cron_expression: "0 * * * *", timezone: "UTC" }}
+        >
+          <Form.Item label="Presets" style={{ marginBottom: 8 }}>
+            <Select
+              allowClear
+              placeholder="Select a preset..."
+              style={{ width: "100%" }}
+              options={CRON_PRESETS}
+              onChange={(value) => {
+                if (value) schedForm.setFieldsValue({ cron_expression: value })
+              }}
+            />
+          </Form.Item>
+          <Form.Item
+            name="cron_expression"
+            label="Cron Expression"
+            rules={[{ required: true, message: "Enter a cron expression" }]}
+            help={
+              <span>
+                Five-field cron syntax.{" "}
+                <a
+                  href="https://crontab.guru/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <LinkOutlined /> crontab.guru
+                </a>
+              </span>
+            }
+          >
+            <Input placeholder="0 */6 * * *" />
+          </Form.Item>
+          <Form.Item
+            name="timezone"
+            label="Timezone"
+            rules={[{ required: true, message: "Enter a timezone" }]}
+            help="e.g. UTC, Europe/Madrid"
+          >
+            <Input placeholder="UTC" />
+          </Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={schedSaving}
+            icon={<SaveOutlined />}
+          >
+            Save Schedule
+          </Button>
+        </Form>
       </Card>
 
-      {/* Edit form */}
-      <Card title="Edit Storage Config" style={{ maxWidth: 600 }}>
+      <Card
+        title={
+          <>
+            <YoutubeOutlined /> YouTube API Key
+          </>
+        }
+        style={{ maxWidth: 600 }}
+      >
         <Alert
-          message="Storage paths are configured via environment variables. Changes here will apply after a server restart."
-          type="warning"
+          message="A YouTube Data API v3 key is needed to fetch videos and resolve @handles to channel IDs. Get one at https://console.cloud.google.com/apis/credentials"
+          type="info"
           showIcon
           icon={<InfoCircleOutlined />}
           style={{ marginBottom: 20 }}
         />
         <Form
-          form={form}
+          form={ytForm}
           layout="vertical"
-          onFinish={handleSubmit}
-          initialValues={{ data_dir: "./data" }}
+          onFinish={handleYtSubmit}
+          initialValues={{ api_key: "" }}
         >
           <Form.Item
-            name="data_dir"
-            label="Data Directory"
-            rules={[{ required: true, message: "Please enter the data directory path" }]}
-            help="Path where data files are stored (e.g. ./data, /app/data)"
+            name="api_key"
+            label="YouTube Data API Key"
+            rules={[
+              {
+                required: true,
+                message: "API key is required for YouTube feeds",
+              },
+            ]}
           >
-            <Input placeholder="./data" />
+            <Input.Password placeholder="AIzaSy..." />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saving} icon={<SaveOutlined />}>
-            Save Changes
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={ytSaving}
+            icon={<SaveOutlined />}
+          >
+            Save
           </Button>
         </Form>
       </Card>
     </div>
-  );
+  )
 }

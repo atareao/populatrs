@@ -41,35 +41,17 @@ describe("LoginPage", () => {
     expect(screen.getByText("Automatic RSS feed publisher")).toBeInTheDocument();
   });
 
-  it("renders login button", () => {
+  it("renders OIDC login button", () => {
     renderLogin();
-    const loginBtn = screen.getByRole("button", { name: /iniciar sesión/i });
+    const loginBtn = screen.getByRole("button", { name: /iniciar con oidc/i });
     expect(loginBtn).toBeInTheDocument();
-  });
-
-  it("renders dev login input and button", () => {
-    renderLogin();
-    expect(screen.getByPlaceholderText("Email para dev login")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /dev/i })).toBeInTheDocument();
   });
 
   it("login button redirects to /auth/login", () => {
     renderLogin();
-    const loginBtn = screen.getByRole("button", { name: /iniciar sesión/i });
+    const loginBtn = screen.getByRole("button", { name: /iniciar con oidc/i });
     fireEvent.click(loginBtn);
     expect(window.location.href).toBe("/auth/login");
-  });
-
-  it("dev login redirects with email", () => {
-    renderLogin();
-    const input = screen.getByPlaceholderText("Email para dev login");
-    fireEvent.change(input, { target: { value: "dev@example.com" } });
-
-    const devBtn = screen.getByRole("button", { name: /dev/i });
-    fireEvent.click(devBtn);
-
-    expect(window.location.href).toContain("/auth/dev-login");
-    expect(window.location.href).toContain("dev%40example.com");
   });
 
   it("renders without crashing when sessionStorage has a token", () => {

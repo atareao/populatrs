@@ -6,6 +6,7 @@ pub mod publishers;
 pub mod schedule;
 pub mod status;
 pub mod storage;
+pub mod youtube;
 
 use std::sync::Arc;
 
@@ -46,6 +47,11 @@ pub fn api_routes() -> Router<Arc<AppState>> {
                 .patch(feeds::toggle),
         )
         .route("/api/feeds/{id}/run", routing::post(feeds::run))
+        .route("/api/feeds/{id}/publish", routing::post(feeds::publish))
+        .route(
+            "/api/feeds/resolve-youtube",
+            routing::post(feeds::resolve_youtube),
+        )
         .route(
             "/api/publishers",
             routing::get(publishers::list).post(publishers::create),
@@ -75,6 +81,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route(
             "/api/storage",
             routing::get(storage::get).put(storage::update),
+        )
+        .route(
+            "/api/youtube",
+            routing::get(youtube::get).put(youtube::update),
         )
         .route("/api/status", routing::get(status::dashboard))
         .route("/api/logs/stream", routing::get(logs::stream))

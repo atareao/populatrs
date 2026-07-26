@@ -118,7 +118,6 @@ just version  # Bump patch + tag
 | `PORT` | Puerto | `3044` |
 | `DATABASE_URL` | Ruta a SQLite | `./data/populatrs.db` |
 | `DATA_DIR` | Directorio de datos | `./data` |
-| `CHECK_INTERVAL` | Minutos entre check de feeds | `60` |
 | `TIMEZONE` | Zona horaria | `UTC` |
 | `RUST_LOG` | Nivel de log | `info` |
 | `LOG_FORMAT` | Formato de log | `pretty` |

@@ -22,14 +22,13 @@ pub async fn run_feed_check(
     feed_manager: Arc<Mutex<FeedManager>>,
     publisher_manager: Arc<PublisherManager>,
     db: &Database,
-    default_interval_minutes: u64,
     dry_run: bool,
 ) -> Result<()> {
     tracing::info!("Starting feed check cycle");
 
     let feed_results = {
         let mut manager = feed_manager.lock().await;
-        manager.check_all_feeds(default_interval_minutes).await
+        manager.check_all_feeds().await
     };
 
     let mut total_new_posts = 0;

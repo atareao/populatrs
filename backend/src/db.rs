@@ -483,6 +483,7 @@ impl Database {
     }
 
     /// Record a publish result for a specific publisher.
+    /// Skips if a result already exists for this (guid, feed_id, publisher_id).
     pub async fn record_publish_result(
         &self,
         guid: &str,
@@ -491,6 +492,14 @@ impl Database {
         success: bool,
         message: Option<&str>,
     ) -> Result<()> {
+        // Check if already recorded — prevents duplicates
+        if self
+            .is_publish_result_recorded(guid, feed_id, publisher_id)
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
         let now = Utc::now().to_rfc3339();
         let conn = self.conn.lock().await;
         conn.execute(
@@ -500,6 +509,26 @@ impl Database {
         )
         .context("Failed to record publish result")?;
         Ok(())
+    }
+
+    /// Check if a publish result already exists for this (guid, feed_id, publisher_id).
+    pub async fn is_publish_result_recorded(
+        &self,
+        guid: &str,
+        feed_id: &str,
+        publisher_id: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM publish_results WHERE guid = ?1 AND feed_id = ?2 AND publisher_id = ?3",
+                params![guid, feed_id, publisher_id],
+                |_| Ok(true),
+            )
+            .optional()
+            .context("Failed to check publish result")?
+            .unwrap_or(false);
+        Ok(exists)
     }
 
     /// Clean up old published posts (older than `days`).
@@ -590,7 +619,8 @@ impl Database {
         for row in rows {
             let (guid, feed_id, title, url, published_at, publisher_id, success, message) = row?;
 
-            if seen.insert(guid.clone()) {
+            let key = (guid.clone(), feed_id.clone());
+            if seen.insert(key) {
                 entries.push(FeedLogEntry {
                     guid: guid.clone(),
                     feed_id: feed_id.clone(),
@@ -712,28 +742,43 @@ impl Database {
 
     /// Get schedule configuration (from settings table).
     pub async fn get_schedule(&self) -> Result<ScheduleConfig> {
-        let interval = self
-            .get_setting("schedule_interval")
-            .await?
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(60);
-        let timezone = self
-            .get_setting("schedule_timezone")
-            .await?
-            .unwrap_or_else(|| "UTC".to_string());
-        Ok(ScheduleConfig {
-            default_interval_minutes: interval,
-            timezone,
-        })
+        // Try new key first
+        let cron = self.get_setting("schedule_cron").await?;
+        match cron {
+            Some(expr) => Ok(ScheduleConfig {
+                cron_expression: expr,
+                timezone: self
+                    .get_setting("schedule_timezone")
+                    .await?
+                    .unwrap_or_else(|| "UTC".to_string()),
+            }),
+            None => {
+                // Migration from old interval-based schedule
+                let old_interval = self
+                    .get_setting("schedule_interval")
+                    .await?
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(60);
+                let cron_expr = format!("*/{} * * * *", old_interval.min(59));
+                let timezone = self
+                    .get_setting("schedule_timezone")
+                    .await?
+                    .unwrap_or_else(|| "UTC".to_string());
+                // Save new format
+                let config = ScheduleConfig {
+                    cron_expression: cron_expr,
+                    timezone,
+                };
+                self.set_schedule(&config).await?;
+                Ok(config)
+            }
+        }
     }
 
     /// Update schedule configuration.
     pub async fn set_schedule(&self, schedule: &ScheduleConfig) -> Result<()> {
-        self.set_setting(
-            "schedule_interval",
-            &schedule.default_interval_minutes.to_string(),
-        )
-        .await?;
+        self.set_setting("schedule_cron", &schedule.cron_expression)
+            .await?;
         self.set_setting("schedule_timezone", &schedule.timezone)
             .await?;
         Ok(())
@@ -773,6 +818,12 @@ impl Database {
         Ok(())
     }
 
+    /// Set only the YouTube API key (used by the Settings UI).
+    pub async fn set_youtube_api_key(&self, api_key: &str) -> Result<()> {
+        self.set_setting("youtube_api_key", api_key).await?;
+        Ok(())
+    }
+
     // ───── Stats ─────
 
     /// Get dashboard stats.
@@ -793,16 +844,15 @@ impl Database {
         // ⚠️ Inline schedule queries while holding the lock to avoid deadlock.
         //    Do NOT call self.get_schedule() here — it would try to re-acquire
         //    the same tokio::sync::Mutex, which is not reentrant.
-        let interval: i64 = conn
+        let cron_expression: String = conn
             .query_row(
-                "SELECT value FROM settings WHERE key = 'schedule_interval'",
+                "SELECT value FROM settings WHERE key = 'schedule_cron'",
                 [],
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .context("Failed to query schedule_interval")?
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(60);
+            .context("Failed to query schedule_cron")?
+            .unwrap_or_else(|| "0 * * * *".to_string());
         let timezone: String = conn
             .query_row(
                 "SELECT value FROM settings WHERE key = 'schedule_timezone'",
@@ -819,7 +869,7 @@ impl Database {
             total_publishers: total_publishers as u64,
             total_published: total_published as u64,
             schedule: ScheduleConfig {
-                default_interval_minutes: interval as u64,
+                cron_expression,
                 timezone,
             },
         })
@@ -984,12 +1034,12 @@ mod tests {
     async fn test_schedule() {
         let (db, _dir) = test_db().await;
         let sched = ScheduleConfig {
-            default_interval_minutes: 30,
+            cron_expression: "0 */2 * * *".to_string(),
             timezone: "Europe/Madrid".into(),
         };
         db.set_schedule(&sched).await.unwrap();
         let loaded = db.get_schedule().await.unwrap();
-        assert_eq!(loaded.default_interval_minutes, 30);
+        assert_eq!(loaded.cron_expression, "0 */2 * * *");
         assert_eq!(loaded.timezone, "Europe/Madrid");
     }
 }

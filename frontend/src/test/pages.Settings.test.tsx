@@ -5,9 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import Settings from "../pages/Settings";
 
-const mockStorage = {
-  data_dir: "/app/data",
-};
+const mockYoutube = { api_key: "AIzaSyTest123" };
+const mockSchedule = { cron_expression: "0 */2 * * *", timezone: "Europe/Madrid", next_run_at: "2026-07-26T12:00:00+00:00" };
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({
@@ -33,6 +32,18 @@ describe("Settings", () => {
     sessionStorage.clear();
     vi.restoreAllMocks();
     sessionStorage.setItem("populatrs_token", "test-token");
+    // mock both endpoints by default
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve(mockYoutube),
+        text: () => Promise.resolve(JSON.stringify(mockYoutube)),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve(mockSchedule),
+        text: () => Promise.resolve(JSON.stringify(mockSchedule)),
+      });
   });
 
   it("shows loading spinner initially", () => {
@@ -42,7 +53,6 @@ describe("Settings", () => {
   });
 
   it("renders the settings page title", async () => {
-    mockFetch(200, mockStorage);
     renderSettings();
 
     await waitFor(() => {
@@ -50,57 +60,66 @@ describe("Settings", () => {
     });
   });
 
-  it("loads and displays current configuration", async () => {
-    mockFetch(200, mockStorage);
+  it("loads and displays schedule section", async () => {
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText("Current Configuration")).toBeInTheDocument();
+      expect(screen.getByText("Schedule")).toBeInTheDocument();
     });
-
-    expect(screen.getByText("/app/data")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/Europe\/Madrid/)).toBeInTheDocument();
   });
 
-  it("renders edit form with loaded values", async () => {
-    mockFetch(200, mockStorage);
+  it("loads and displays youtube config section", async () => {
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText("Edit Storage Config")).toBeInTheDocument();
+      expect(screen.getByText("YouTube API Key")).toBeInTheDocument();
     });
-
-    const inputs = screen.getAllByRole("textbox");
-    expect(inputs.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("saves storage config on form submit", async () => {
-    mockFetch(200, mockStorage);
+  it("saves youtube config on form submit", async () => {
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText("Edit Storage Config")).toBeInTheDocument();
+      expect(screen.getByText("YouTube API Key")).toBeInTheDocument();
     });
 
-    // Mock the PUT response
-    mockFetch(200, { status: "ok" });
-
-    const saveBtn = screen.getByRole("button", { name: /save changes/i });
+    const saveBtn = screen.getByRole("button", { name: /save$/i });
     await userEvent.click(saveBtn);
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        "/api/storage",
+        "/api/youtube",
         expect.objectContaining({ method: "PUT" }),
       );
     });
   });
 
-  it("shows warning about restart requirement", async () => {
-    mockFetch(200, mockStorage);
+  it("saves schedule on form submit", async () => {
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText(/will apply after a server restart/i)).toBeInTheDocument();
+      expect(screen.getByText("Schedule")).toBeInTheDocument();
+    });
+
+    const saveBtn = screen.getByRole("button", { name: /save schedule/i });
+    await userEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/schedule",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+  });
+
+  it("shows info about youtube api key", async () => {
+    renderSettings();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/YouTube Data API v3 key/i),
+      ).toBeInTheDocument();
     });
   });
 });

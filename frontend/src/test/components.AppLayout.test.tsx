@@ -43,13 +43,18 @@ describe("AppLayout", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("Feeds")).toBeInTheDocument();
     expect(screen.getByText("Publishers")).toBeInTheDocument();
-    expect(screen.getByText("Schedule")).toBeInTheDocument();
+    expect(screen.getByText("Logs")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
   it("renders logout button", () => {
     renderLayout();
     expect(screen.getByText("Cerrar sesión")).toBeInTheDocument();
+  });
+
+  it("renders the collapse button", () => {
+    renderLayout();
+    expect(screen.getByRole("button", { name: "menu-fold" })).toBeInTheDocument();
   });
 
   it("renders the Outlet content", () => {
