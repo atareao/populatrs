@@ -27,8 +27,10 @@ pub struct OAuthCallbackPayload {
 /// Query params for the GET /oauth/callback endpoint (called by OAuth provider).
 #[derive(Debug, Deserialize)]
 pub struct OAuthCallbackQuery {
-    pub code: String,
+    pub code: Option<String>,
     pub state: Option<String>,
+    pub error: Option<String>,
+    pub error_description: Option<String>,
 }
 
 /// `GET /api/publishers/{id}/oauth/authorize`
@@ -488,7 +490,26 @@ pub async fn callback_get(
     State(state): State<Arc<AppState>>,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> impl IntoResponse {
-    let code = &query.code;
+    // Handle OAuth provider errors (e.g. user denies authorization)
+    if let Some(error) = &query.error {
+        let desc = query
+            .error_description
+            .as_deref()
+            .unwrap_or("OAuth authorization denied");
+        tracing::warn!(error = %error, description = %desc, "OAuth callback received error");
+        return Html(oauth_result_html(false, desc)).into_response();
+    }
+
+    let code = match &query.code {
+        Some(c) => c.clone(),
+        None => {
+            return Html(oauth_result_html(
+                false,
+                "Missing authorization code from OAuth provider",
+            ))
+            .into_response();
+        }
+    };
     let state_param = query.state.as_deref().unwrap_or("");
 
     // ── 1. Resolve publisher_id and type from state ──
@@ -591,20 +612,20 @@ pub async fn callback_get(
                 }
             };
 
-            let (access_token, refresh_token, _) = match li_pub.exchange_code_for_tokens(code).await
-            {
-                Ok(tokens) => tokens,
-                Err(e) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Html(oauth_result_html(
-                            false,
-                            &format!("Token exchange failed: {e}"),
-                        )),
-                    )
-                        .into_response();
-                }
-            };
+            let (access_token, refresh_token, _) =
+                match li_pub.exchange_code_for_tokens(&code).await {
+                    Ok(tokens) => tokens,
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            Html(oauth_result_html(
+                                false,
+                                &format!("Token exchange failed: {e}"),
+                            )),
+                        )
+                            .into_response();
+                    }
+                };
 
             // Obtener el user_id de LinkedIn automáticamente
             let user_id = match li_pub.get_user_profile(&access_token).await {
@@ -670,20 +691,20 @@ pub async fn callback_get(
                 }
             };
 
-            let (access_token, _refresh_token, _) = match m_pub.exchange_code_for_tokens(code).await
-            {
-                Ok(tokens) => tokens,
-                Err(e) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Html(oauth_result_html(
-                            false,
-                            &format!("Token exchange failed: {e}"),
-                        )),
-                    )
-                        .into_response();
-                }
-            };
+            let (access_token, _refresh_token, _) =
+                match m_pub.exchange_code_for_tokens(&code).await {
+                    Ok(tokens) => tokens,
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            Html(oauth_result_html(
+                                false,
+                                &format!("Token exchange failed: {e}"),
+                            )),
+                        )
+                            .into_response();
+                    }
+                };
 
             let updated = PublisherConfig::Mastodon {
                 server_url: m_pub.server_url.clone(),
@@ -735,7 +756,7 @@ pub async fn callback_get(
             let code_verifier = "challenge".to_string();
 
             let (access_token, refresh_token, _) =
-                match x_pub.exchange_code_for_tokens(code, &code_verifier).await {
+                match x_pub.exchange_code_for_tokens(&code, &code_verifier).await {
                     Ok(tokens) => tokens,
                     Err(e) => {
                         return (
@@ -795,7 +816,7 @@ pub async fn callback_get(
             };
 
             let (access_token, user_id, _expires_in) =
-                match t_pub.exchange_code_for_tokens(code).await {
+                match t_pub.exchange_code_for_tokens(&code).await {
                     Ok(tokens) => tokens,
                     Err(e) => {
                         return (
@@ -911,4 +932,138 @@ fn oauth_result_html(success: bool, message: &str) -> String {
 </body>
 </html>"#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── OAuthCallbackQuery deserialization ──
+
+    #[test]
+    fn test_oauth_callback_query_with_code_and_state() {
+        let q: OAuthCallbackQuery = serde_json::from_str(
+            r#"{"code": "abc123", "state": "def456", "error": null, "error_description": null}"#,
+        )
+        .unwrap();
+        assert_eq!(q.code.as_deref(), Some("abc123"));
+        assert_eq!(q.state.as_deref(), Some("def456"));
+        assert!(q.error.is_none());
+        assert!(q.error_description.is_none());
+    }
+
+    #[test]
+    fn test_oauth_callback_query_with_error_no_code() {
+        let q: OAuthCallbackQuery = serde_json::from_str(
+            r#"{"error": "access_denied", "error_description": "User denied", "code": null, "state": null}"#,
+        )
+        .unwrap();
+        assert!(q.code.is_none());
+        assert!(q.state.is_none());
+        assert_eq!(q.error.as_deref(), Some("access_denied"));
+        assert_eq!(q.error_description.as_deref(), Some("User denied"));
+    }
+
+    #[test]
+    fn test_oauth_callback_query_code_missing() {
+        let q: OAuthCallbackQuery = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(q.code.is_none());
+        assert!(q.state.is_none());
+        assert!(q.error.is_none());
+        assert!(q.error_description.is_none());
+    }
+
+    // ── OAuthCallbackPayload deserialization ──
+
+    #[test]
+    fn test_oauth_callback_payload_with_code() {
+        let p: OAuthCallbackPayload =
+            serde_json::from_str(r#"{"code": "auth_code_xyz", "state": "my_state"}"#).unwrap();
+        assert_eq!(p.code, "auth_code_xyz");
+        assert_eq!(p.state.as_deref(), Some("my_state"));
+    }
+
+    #[test]
+    fn test_oauth_callback_payload_code_only() {
+        let p: OAuthCallbackPayload = serde_json::from_str(r#"{"code": "just_code"}"#).unwrap();
+        assert_eq!(p.code, "just_code");
+        assert!(p.state.is_none());
+    }
+
+    // ── resolve_publisher_id ──
+
+    #[test]
+    fn test_resolve_publisher_id_found() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("x:pub123".into(), ("state_abc".into(), Instant::now()));
+        map.insert(
+            "linkedin:pub456".into(),
+            ("state_def".into(), Instant::now()),
+        );
+        assert_eq!(
+            resolve_publisher_id(&map, "state_abc"),
+            Some("pub123".to_string())
+        );
+        assert_eq!(
+            resolve_publisher_id(&map, "state_def"),
+            Some("pub456".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_publisher_id_not_found() {
+        let map = std::collections::HashMap::new();
+        assert_eq!(resolve_publisher_id(&map, "nonexistent"), None);
+    }
+
+    #[test]
+    fn test_resolve_publisher_id_no_match_for_state() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("x:pub1".into(), ("state1".into(), Instant::now()));
+        assert_eq!(resolve_publisher_id(&map, "state2"), None);
+    }
+
+    // ── oauth_result_html ──
+
+    #[test]
+    fn test_oauth_result_html_success_contains_expected_strings() {
+        let html = oauth_result_html(true, "Connected!");
+        assert!(html.contains("OAuth success"));
+        assert!(html.contains("✅ Connected!"));
+        assert!(html.contains("Connected!"));
+        assert!(html.contains("#22c55e"));
+        assert!(html.contains("window.close"));
+        assert!(html.contains("oauth-success"));
+    }
+
+    #[test]
+    fn test_oauth_result_html_error_contains_expected_strings() {
+        let html = oauth_result_html(false, "Something went wrong");
+        assert!(html.contains("OAuth error"));
+        assert!(html.contains("❌ Connection failed"));
+        assert!(html.contains("Something went wrong"));
+        assert!(html.contains("#ef4444"));
+        assert!(html.contains("oauth-error"));
+    }
+
+    #[test]
+    fn test_oauth_result_html_message_escaping() {
+        let html = oauth_result_html(false, "Error: <script>alert('xss')</script>");
+        // The template has its own <script> tag, so we verify the user message is escaped
+        assert!(html.contains("&lt;script&gt;alert('xss')&lt;/script&gt;"));
+        assert!(!html.contains("<script>alert('xss')</script>"));
+    }
+
+    #[test]
+    fn test_oauth_result_html_message_quotes_escaped() {
+        let html = oauth_result_html(true, r#"He said "hello""#);
+        assert!(html.contains("&quot;"));
+        assert!(!html.contains(r#""hello""#));
+    }
+
+    #[test]
+    fn test_oauth_result_html_doctype() {
+        let html = oauth_result_html(true, "ok");
+        assert!(html.starts_with("<!DOCTYPE html>"));
+    }
 }
