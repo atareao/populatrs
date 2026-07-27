@@ -1,5 +1,15 @@
 # Changelog
+## [1.0.0] - 2026-07-27
+
+### Bug Fixes
+
+- *(ci)* Bump detect gitmoji feat: with word boundary and check body for BREAKING CHANGE
+- *(ci)* Detect gitmoji feat: for minor bumps
 ## [0.3.11] - 2026-07-27
+
+### Miscellaneous Tasks
+
+- Release v0.3.11
 
 ### Other
 
