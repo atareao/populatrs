@@ -1,5 +1,14 @@
 # Changelog
+## [0.4.4] - 2026-07-27
+
+### Bug Fixes
+
+- *(ci)* Use GH_PAT instead of GITHUB_TOKEN to trigger release workflow
 ## [0.4.3] - 2026-07-27
+
+### Miscellaneous Tasks
+
+- Release v0.4.3
 
 ### Other
 
