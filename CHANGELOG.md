@@ -1,4 +1,18 @@
 # Changelog
+## [0.3.7] - 2026-07-26
+
+### Other
+
+- 0.4.0 — OIDC state, timezone-aware cron, Threads fix
+## [0.3.6] - 2026-07-26
+
+### Bug Fixes
+
+- *(threads)* Fix access_token as query param and user_id numeric parsing
+
+### Miscellaneous Tasks
+
+- Release v0.3.6
 ## [0.3.5] - 2026-07-25
 
 ### Features
@@ -6,6 +20,10 @@
 - *(oauth)* Add OAuth flows for Threads and Mastodon publishers
 - Improve publisher UI - replace switches with emojis, hide feed ID column, add test result modals
 - Improve publisher UI and add OAuth flows for Threads/Mastodon
+
+### Miscellaneous Tasks
+
+- Release v0.3.5
 
 ### Other
 
