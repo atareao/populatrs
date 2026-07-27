@@ -12,8 +12,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run tests
-        run: cargo test
+        run: cargo test --manifest-path backend/Cargo.toml
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo fmt --manifest-path backend/Cargo.toml --all -- --check
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --manifest-path backend/Cargo.toml -- -D warnings

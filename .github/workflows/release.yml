@@ -31,11 +31,11 @@ jobs:
       - name: Install Rust toolchain
         run: rustup target add ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --manifest-path backend/Cargo.toml
       - name: Prepare archive
         shell: bash
         run: |
-          BIN="target/${{ matrix.target }}/release/populatrs${{ matrix.ext }}"
+          BIN="backend/target/${{ matrix.target }}/release/populatrs${{ matrix.ext }}"
           ARCHIVE_NAME="populatrs${{ matrix.ext }}"
           cp "$BIN" "$ARCHIVE_NAME"
           PKG="populatrs-${{ matrix.target }}"
@@ -121,4 +121,4 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --allow-dirty
+        run: cargo publish --manifest-path backend/Cargo.toml --allow-dirty
