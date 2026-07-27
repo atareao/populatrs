@@ -61,5 +61,5 @@ jobs:
           git push origin "v${V}"
       - name: Sync development with main
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: gh api -X PUT repos/${{ github.repository }}/git/refs/heads/development -f sha=$(git rev-parse HEAD)
