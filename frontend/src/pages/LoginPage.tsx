@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router";
 import { Button, Card, Typography, Divider, Image } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
 import { getToken } from "../store/auth";

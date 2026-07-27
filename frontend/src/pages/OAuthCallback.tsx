@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { Typography, Spin, Result, Button } from "antd";
 import { oauthCallback } from "../api/http";
 

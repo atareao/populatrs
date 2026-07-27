@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { ConfigProvider } from "antd";
 import AppLayout from "../components/AppLayout";
 
@@ -9,9 +9,9 @@ vi.mock("../hooks/useAuth", () => ({
   useAuth: () => ({ user: { sub: "test", email: "test@test.com", name: "Test" }, loading: false }),
 }));
 
-// Mock Outlet from react-router-dom
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual("react-router-dom");
+// Mock Outlet from react-router
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual("react-router");
   return {
     ...actual,
     Outlet: () => <div data-testid="outlet">Outlet Content</div>,
