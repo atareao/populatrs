@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   release:
-    if: "!startsWith(github.event.head_commit.message, 'chore: release')"
+    if: |
+      github.event_name != 'push' ||
+      !startsWith(github.event.head_commit.message, 'chore: release')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +25,8 @@ jobs:
           tool: git-cliff
       - name: Cache cargo
         uses: swatinem/rust-cache@v2
+        with:
+          workspaces: backend
       - name: Install vampus
         run: cargo install vampus --git https://github.com/atareao/vampus
       - name: Determine bump type from commits
@@ -47,18 +51,21 @@ jobs:
       - name: Generate changelog
         run: git-cliff -o CHANGELOG.md --tag "v${{ steps.version.outputs.value }}"
       - name: Commit, tag and push
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           V="${{ steps.version.outputs.value }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git
           git add -A
           git commit -m "chore: release v${V}"
           git tag "v${V}"
           git push origin main
           git push origin "v${V}"
+      - name: Trigger Release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.version.outputs.value }}"
+          gh workflow run Release --ref v${V}
       - name: Sync development with main
         env:
           GH_TOKEN: ${{ github.token }}
