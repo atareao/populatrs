@@ -1,9 +1,11 @@
 use super::Publisher;
-use crate::models::{Post, TemplateContext, TemplateRenderer};
+use crate::db::Database;
+use crate::models::{Post, PublisherConfig, TemplateContext, TemplateRenderer};
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use tokio::time;
 use url::Url;
 use uuid::Uuid;
@@ -13,15 +15,18 @@ pub struct ThreadsPublisher {
     pub id: String,
     pub client_id: String,
     pub client_secret: String,
-    pub access_token: Option<String>,
+    pub access_token: Arc<tokio::sync::Mutex<Option<String>>>,
     pub user_id: Option<String>,
     pub redirect_uri: String,
     pub template: String,
     client: Client,
     renderer: TemplateRenderer,
+    pub db: Option<Arc<Database>>,
+    pub token_expires_at: Arc<tokio::sync::Mutex<Option<i64>>>,
 }
 
 impl ThreadsPublisher {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         client_id: String,
@@ -30,6 +35,8 @@ impl ThreadsPublisher {
         user_id: Option<String>,
         redirect_uri: Option<String>,
         template: String,
+        db: Option<Arc<Database>>,
+        token_expires_at: Option<i64>,
     ) -> Self {
         let redirect_uri = redirect_uri.unwrap_or_else(|| "https://127.0.0.1".to_string());
 
@@ -37,12 +44,14 @@ impl ThreadsPublisher {
             id,
             client_id,
             client_secret,
-            access_token,
+            access_token: Arc::new(tokio::sync::Mutex::new(access_token)),
             user_id,
             redirect_uri,
             template,
             client: Client::new(),
             renderer: TemplateRenderer::new(),
+            db,
+            token_expires_at: Arc::new(tokio::sync::Mutex::new(token_expires_at)),
         }
     }
 
@@ -125,6 +134,147 @@ impl ThreadsPublisher {
             ))
         }
     }
+
+    /// Exchange a short-lived Threads token for a long-lived one (60 days).
+    /// Meta endpoint: GET /access_token?grant_type=th_exchange_token
+    pub(crate) async fn exchange_for_long_lived_token(
+        &self,
+        short_lived: &str,
+    ) -> Result<(String, u64)> {
+        let url = "https://graph.threads.net/access_token";
+        let response = self
+            .client
+            .get(url)
+            .query(&[
+                ("grant_type", "th_exchange_token"),
+                ("client_secret", &self.client_secret),
+                ("access_token", short_lived),
+            ])
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "Failed to exchange Threads token for long-lived: {} - {}",
+                status,
+                body
+            ));
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        let long_lived = data["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("No access_token in long-lived exchange response"))?
+            .to_string();
+        let expires_in = data["expires_in"].as_u64().unwrap_or(5184000);
+
+        tracing::info!(
+            "Exchanged Threads token for long-lived — expires in {}s",
+            expires_in
+        );
+
+        Ok((long_lived, expires_in))
+    }
+
+    /// Persist the current access_token and expiry to the database.
+    async fn save_tokens_to_config(&self) -> Result<()> {
+        let Some(ref db) = self.db else {
+            tracing::warn!("No database reference — Threads tokens not persisted");
+            return Ok(());
+        };
+
+        let access_token = {
+            let guard = self.access_token.lock().await;
+            guard
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("Cannot save Threads config: no access token"))?
+        };
+
+        let expires_at = {
+            let guard = self.token_expires_at.lock().await;
+            *guard
+        };
+
+        let config = PublisherConfig::Threads {
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            access_token: Some(access_token),
+            user_id: self.user_id.clone(),
+            redirect_uri: Some(self.redirect_uri.clone()),
+            template: self.template.clone(),
+            token_expires_at: expires_at,
+        };
+        db.upsert_publisher(&self.id, &config, true).await?;
+        tracing::info!("Persisted Threads tokens to database for '{}'", self.id);
+        Ok(())
+    }
+
+    /// Return a valid access token, exchanging for long-lived if expired/missing.
+    async fn get_valid_access_token(&self) -> Result<String> {
+        let now = chrono::Utc::now().timestamp();
+
+        // Check current state
+        {
+            let token_guard = self.access_token.lock().await;
+            let expires_guard = self.token_expires_at.lock().await;
+
+            if let Some(ref token) = *token_guard {
+                match *expires_guard {
+                    Some(expires_at) if now < expires_at - 3600 => {
+                        // Still valid with at least 1 hour buffer
+                        return Ok(token.clone());
+                    }
+                    Some(expires_at) => {
+                        // Token exists but is expired or near-expiry, try exchange
+                        tracing::info!(
+                            "Threads token expired at {}, attempting long-lived exchange",
+                            expires_at
+                        );
+                    }
+                    None => {
+                        // No expiry info — token was stored before the fix.
+                        // It's already long-lived (OAuth callback always exchanges),
+                        // so assume it's still valid and use it directly.
+                        // We return Ok here instead of attempting exchange to avoid
+                        // the 452 error (exchanging a long-lived token as short-lived).
+                        tracing::debug!(
+                            "Threads token has no expiry info, assuming long-lived and using as-is"
+                        );
+                        return Ok(token.clone());
+                    }
+                }
+            }
+        }
+
+        // Need to exchange (token missing or expired)
+        let current_token = {
+            let guard = self.access_token.lock().await;
+            guard
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("No Threads access token available"))?
+        };
+
+        let (new_token, expires_in) = self.exchange_for_long_lived_token(&current_token).await?;
+
+        // Update in-memory state
+        {
+            let mut token_guard = self.access_token.lock().await;
+            *token_guard = Some(new_token.clone());
+        }
+        {
+            let mut expires_guard = self.token_expires_at.lock().await;
+            *expires_guard = Some(now + expires_in as i64);
+        }
+
+        // Persist to DB
+        if let Err(e) = self.save_tokens_to_config().await {
+            tracing::warn!("Failed to persist Threads tokens: {}", e);
+        }
+
+        Ok(new_token)
+    }
 }
 
 #[async_trait]
@@ -134,10 +284,8 @@ impl Publisher for ThreadsPublisher {
             .filter(|t| !t.is_empty())
             .unwrap_or(&self.template);
 
-        let access_token = self
-            .access_token
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No access token"))?;
+        // Get a valid (long-lived) access token
+        let access_token = self.get_valid_access_token().await?;
 
         let user_id = self
             .user_id
@@ -158,8 +306,8 @@ impl Publisher for ThreadsPublisher {
         let text = self.renderer.render(template_str, &context)?;
 
         // Threads has a character limit of 500
-        let text = if text.len() > 500 {
-            format!("{}...", &text[..497])
+        let text = if text.chars().count() > 500 {
+            format!("{}...", text.chars().take(497).collect::<String>())
         } else {
             text
         };

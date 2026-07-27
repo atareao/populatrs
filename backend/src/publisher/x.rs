@@ -1,4 +1,5 @@
 use super::Publisher;
+use crate::db::Database;
 use crate::models::{Post, TemplateContext, TemplateRenderer};
 
 use anyhow::Result;
@@ -11,6 +12,8 @@ use tokio::sync::Mutex;
 use url::Url;
 use uuid::Uuid;
 
+use crate::models::PublisherConfig;
+
 pub struct XPublisher {
     pub id: String,
     pub client_id: String,
@@ -22,6 +25,7 @@ pub struct XPublisher {
     client: Client,
     renderer: TemplateRenderer,
     pub config_file_path: Option<String>,
+    pub db: Option<Arc<Database>>,
 }
 
 impl XPublisher {
@@ -35,6 +39,7 @@ impl XPublisher {
         redirect_uri: Option<String>,
         template: String,
         config_file_path: Option<String>,
+        db: Option<Arc<Database>>,
     ) -> Self {
         let redirect_uri = redirect_uri.unwrap_or_else(|| "https://127.0.0.1".to_string());
 
@@ -49,6 +54,7 @@ impl XPublisher {
             client: Client::new(),
             renderer: TemplateRenderer::new(),
             config_file_path,
+            db,
         }
     }
 
@@ -282,13 +288,32 @@ impl XPublisher {
         Ok(new_access_token)
     }
 
-    /// Guardar tokens actualizados en la configuración
+    /// Guardar tokens actualizados en la configuración (persiste a DB)
     pub async fn save_tokens_to_config(
         &self,
-        _access_token: &str,
-        _refresh_token: Option<&str>,
+        access_token: &str,
+        refresh_token: Option<&str>,
     ) -> Result<()> {
-        tracing::info!("X tokens updated in memory for '{}'", self.id);
+        tracing::info!("Saving X tokens to config for '{}'", self.id);
+
+        if let Some(ref db) = self.db {
+            let config = PublisherConfig::X {
+                client_id: self.client_id.clone(),
+                client_secret: self.client_secret.clone(),
+                access_token: Some(access_token.to_string()),
+                refresh_token: refresh_token.map(|s| s.to_string()),
+                redirect_uri: Some(self.redirect_uri.clone()),
+                template: self.template.clone(),
+            };
+            db.upsert_publisher(&self.id, &config, true).await?;
+            tracing::info!("Persisted X tokens to database for '{}'", self.id);
+        } else {
+            tracing::warn!(
+                "No database reference — X tokens for '{}' only updated in memory",
+                self.id
+            );
+        }
+
         Ok(())
     }
 }
