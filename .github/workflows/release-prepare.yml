@@ -62,13 +62,13 @@ jobs:
           git push origin "v${V}"
       - name: Trigger Release workflow
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           V="${{ steps.version.outputs.value }}"
           gh workflow run Release --ref v${V}
       - name: Sync development with main
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
