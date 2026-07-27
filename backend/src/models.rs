@@ -154,6 +154,7 @@ pub enum PublisherConfig {
         user_id: Option<String>,
         redirect_uri: Option<String>,
         template: String,
+        token_expires_at: Option<i64>,
     },
     Discord {
         webhook_url: String,

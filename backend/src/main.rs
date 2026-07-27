@@ -223,7 +223,7 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
             }
         };
 
-        let mut publisher_manager = PublisherManager::new();
+        let mut publisher_manager = PublisherManager::new_with_db(None, Some(Arc::new(db.clone())));
         for (id, (pub_config, enabled)) in &publishers {
             if !enabled {
                 tracing::debug!("Skipping disabled publisher: {}", id);
