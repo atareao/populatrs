@@ -1,5 +1,15 @@
 # Changelog
+## [0.3.8] - 2026-07-27
+
+### Bug Fixes
+
+- *(threads)* Persist token_expires_at to avoid 452 error on restart
+- *(threads)* Persist token_expires_at to avoid 452 error on restart
 ## [0.3.7] - 2026-07-26
+
+### Miscellaneous Tasks
+
+- Release v0.3.7
 
 ### Other
 
