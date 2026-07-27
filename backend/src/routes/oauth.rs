@@ -13,7 +13,8 @@ use serde_json::json;
 use crate::auth::AppState;
 use crate::models::PublisherConfig;
 use crate::publisher::{
-    create_publisher, LinkedInPublisher, MastodonPublisher, ThreadsPublisher, XPublisher,
+    create_publisher, create_publisher_with_config_path, LinkedInPublisher, MastodonPublisher,
+    ThreadsPublisher, XPublisher,
 };
 
 /// Payload sent by the frontend after the OAuth provider redirects the user
@@ -62,7 +63,12 @@ pub async fn authorize(
     };
 
     // ── 2. Create publisher instance ──
-    let publisher = match create_publisher(id.clone(), &config) {
+    let publisher = match create_publisher_with_config_path(
+        id.clone(),
+        &config,
+        None,
+        Some(Arc::new(state.db.clone())),
+    ) {
         Ok(p) => p,
         Err(e) => {
             return (
@@ -190,7 +196,12 @@ pub async fn callback(
     };
 
     // ── 2. Create publisher instance ──
-    let publisher = match create_publisher(id.clone(), &config) {
+    let publisher = match create_publisher_with_config_path(
+        id.clone(),
+        &config,
+        None,
+        Some(Arc::new(state.db.clone())),
+    ) {
         Ok(p) => p,
         Err(e) => {
             return (
@@ -359,7 +370,7 @@ pub async fn callback(
             }
         }
 
-        let (access_token, user_id, _expires_in) = match t_pub
+        let (access_token, user_id, _short_expires_in) = match t_pub
             .exchange_code_for_tokens(&payload.code)
             .await
         {
@@ -373,6 +384,17 @@ pub async fn callback(
             }
         };
 
+        // Exchange the short-lived token for a long-lived one (60 days)
+        let (long_lived_token, long_expires_in) =
+            match t_pub.exchange_for_long_lived_token(&access_token).await {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    tracing::warn!("Failed to exchange for long-lived Threads token: {}", e);
+                    // Fall back to short-lived token
+                    (access_token.clone(), _short_expires_in)
+                }
+            };
+
         // user_id comes directly from Meta's token exchange response
         // If missing, fall back to looking up via a placeholder
         let final_user_id = user_id.or_else(|| {
@@ -380,13 +402,16 @@ pub async fn callback(
             None
         });
 
+        let token_expires_at = Some(chrono::Utc::now().timestamp() + long_expires_in as i64);
+
         let updated = PublisherConfig::Threads {
             client_id: t_pub.client_id.clone(),
             client_secret: t_pub.client_secret.clone(),
-            access_token: Some(access_token),
+            access_token: Some(long_lived_token),
             user_id: final_user_id,
             redirect_uri: Some(t_pub.redirect_uri.clone()),
             template: t_pub.template.clone(),
+            token_expires_at,
         };
 
         if let Err(e) = state.db.upsert_publisher(&id, &updated, true).await {
@@ -582,7 +607,12 @@ pub async fn callback_get(
     };
 
     // ── 4. Create publisher and exchange code ──
-    let publisher = match create_publisher(publisher_id.clone(), &config) {
+    let publisher = match create_publisher_with_config_path(
+        publisher_id.clone(),
+        &config,
+        None,
+        Some(Arc::new(state.db.clone())),
+    ) {
         Ok(p) => p,
         Err(e) => {
             return (
@@ -815,7 +845,7 @@ pub async fn callback_get(
                 }
             };
 
-            let (access_token, user_id, _expires_in) =
+            let (access_token, user_id, _short_expires_in) =
                 match t_pub.exchange_code_for_tokens(&code).await {
                     Ok(tokens) => tokens,
                     Err(e) => {
@@ -830,18 +860,31 @@ pub async fn callback_get(
                     }
                 };
 
+            // Exchange for long-lived token
+            let (long_lived_token, long_expires_in) =
+                match t_pub.exchange_for_long_lived_token(&access_token).await {
+                    Ok(tokens) => tokens,
+                    Err(e) => {
+                        tracing::warn!("Failed to exchange for long-lived Threads token: {}", e);
+                        (access_token.clone(), _short_expires_in)
+                    }
+                };
+
             let final_user_id = user_id.or_else(|| {
                 tracing::warn!("Threads token exchange did not return user_id");
                 None
             });
 
+            let token_expires_at = Some(chrono::Utc::now().timestamp() + long_expires_in as i64);
+
             let updated = PublisherConfig::Threads {
                 client_id: t_pub.client_id.clone(),
                 client_secret: t_pub.client_secret.clone(),
-                access_token: Some(access_token),
+                access_token: Some(long_lived_token),
                 user_id: final_user_id,
                 redirect_uri: Some(t_pub.redirect_uri.clone()),
                 template: t_pub.template.clone(),
+                token_expires_at,
             };
 
             if let Err(e) = state

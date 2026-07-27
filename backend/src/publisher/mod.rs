@@ -2,7 +2,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::any::Any;
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use crate::db::Database;
 use crate::models::{Post, PublisherConfig};
 
 pub mod bluesky;
@@ -36,13 +38,14 @@ pub trait Publisher: Send + Sync {
 }
 
 pub fn create_publisher(id: String, config: &PublisherConfig) -> Result<Box<dyn Publisher>> {
-    create_publisher_with_config_path(id, config, None)
+    create_publisher_with_config_path(id, config, None, None)
 }
 
 pub fn create_publisher_with_config_path(
     id: String,
     config: &PublisherConfig,
     config_path: Option<String>,
+    db: Option<Arc<Database>>,
 ) -> Result<Box<dyn Publisher>> {
     match config {
         PublisherConfig::Telegram {
@@ -75,6 +78,7 @@ pub fn create_publisher_with_config_path(
             redirect_uri.clone(),
             template.clone(),
             config_path,
+            db,
         ))),
         PublisherConfig::Mastodon {
             server_url,
@@ -156,6 +160,7 @@ pub fn create_publisher_with_config_path(
             user_id,
             redirect_uri,
             template,
+            token_expires_at,
         } => Ok(Box::new(ThreadsPublisher::new(
             id,
             client_id.clone(),
@@ -164,6 +169,8 @@ pub fn create_publisher_with_config_path(
             user_id.clone(),
             redirect_uri.clone(),
             template.clone(),
+            db,
+            *token_expires_at,
         ))),
         PublisherConfig::Discord {
             webhook_url,
@@ -199,6 +206,7 @@ pub fn get_default_template(publisher_type: &str) -> String {
 pub struct PublisherManager {
     publishers: HashMap<String, Box<dyn Publisher>>,
     config_path: Option<String>,
+    db: Option<Arc<Database>>,
 }
 
 impl PublisherManager {
@@ -206,6 +214,7 @@ impl PublisherManager {
         Self {
             publishers: HashMap::new(),
             config_path: None,
+            db: None,
         }
     }
 
@@ -213,12 +222,25 @@ impl PublisherManager {
         Self {
             publishers: HashMap::new(),
             config_path: Some(config_path),
+            db: None,
+        }
+    }
+
+    pub fn new_with_db(config_path: Option<String>, db: Option<Arc<Database>>) -> Self {
+        Self {
+            publishers: HashMap::new(),
+            config_path,
+            db,
         }
     }
 
     pub fn add_publisher(&mut self, id: String, config: &PublisherConfig) -> Result<()> {
-        let publisher =
-            create_publisher_with_config_path(id.clone(), config, self.config_path.clone())?;
+        let publisher = create_publisher_with_config_path(
+            id.clone(),
+            config,
+            self.config_path.clone(),
+            self.db.clone(),
+        )?;
         self.publishers.insert(id, publisher);
         Ok(())
     }
