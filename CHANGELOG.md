@@ -1,4 +1,14 @@
 # Changelog
+## [0.4.3] - 2026-07-27
+
+### Other
+
+- Upgrade react-router-dom to v8.3.0 (CSRF security fix) (#27) (#28)
+## [0.4.2] - 2026-07-27
+
+### Miscellaneous Tasks
+
+- Release v0.4.2
 ## [0.4.0] - 2026-07-27
 
 ### Bug Fixes

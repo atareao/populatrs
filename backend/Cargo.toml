@@ -1,6 +1,6 @@
 [package]
 name = "populatrs"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "Automated RSS feed publisher for multiple social platforms"
 license = "MIT"
