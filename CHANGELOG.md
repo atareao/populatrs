@@ -1,14 +1,25 @@
 # Changelog
+## [0.3.11] - 2026-07-27
+
+### Other
+
+- 0.4.0 — Cron presets, YouTube publisher, docs
 ## [0.3.10] - 2026-07-27
 
 ### Bug Fixes
 
 - *(ci)* Proper merge sync of development with main after release
 - *(ci)* Proper merge sync of development with main after release
+
+### Miscellaneous Tasks
+
+- Release v0.3.10
 ## [0.3.9] - 2026-07-27
 
 ### Bug Fixes
 
+- *(ci)* Use github.token instead of secrets.GH_PAT for sync step
+- *(ci)* Proper merge sync of development with main after release
 - *(ci)* Use github.token instead of secrets.GH_PAT for sync step
 
 ### Miscellaneous Tasks
@@ -39,16 +50,19 @@
 
 - *(threads)* Fix access_token as query param and user_id numeric parsing
 
+### Features
+
+- OIDC state, timezone-aware cron, Threads fix, cron presets
+
 ### Miscellaneous Tasks
 
 - Release v0.3.6
 ## [0.3.5] - 2026-07-25
 
-### Features
+### Documentation
 
-- *(oauth)* Add OAuth flows for Threads and Mastodon publishers
-- Improve publisher UI - replace switches with emojis, hide feed ID column, add test result modals
-- Improve publisher UI and add OAuth flows for Threads/Mastodon
+- Rewrite README to reflect current web app architecture
+- Add populatrs.env.example with all env vars and fix README table
 
 ### Miscellaneous Tasks
 
@@ -57,7 +71,19 @@
 ### Other
 
 - V0.4.0
+
+### Styling
+
+- Add app icon to favicon and login page
 ## [0.3.4] - 2026-07-23
+
+### Features
+
+- *(oauth)* Add OAuth flows for Threads and Mastodon publishers
+- Improve publisher UI - replace switches with emojis, hide feed ID column, add test result modals
+- Improve publisher UI and add OAuth flows for Threads/Mastodon
+- Add YouTube API config, publisher manager, and feed publish endpoint
+- Add cron-based schedule with settings UI and dashboard timing (#19)
 
 ### Miscellaneous Tasks
 
