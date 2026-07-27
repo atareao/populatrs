@@ -62,4 +62,10 @@ jobs:
       - name: Sync development with main
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X PUT repos/${{ github.repository }}/git/refs/heads/development -f sha=$(git rev-parse HEAD)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin development
+          git checkout -b temp-sync origin/development
+          git merge origin/main --no-edit
+          git push origin temp-sync:development
