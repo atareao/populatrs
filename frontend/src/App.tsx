@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router";
 import { useAuth } from "./hooks/useAuth";
 import AppLayout from "./components/AppLayout";
 import { Spin } from "antd";
