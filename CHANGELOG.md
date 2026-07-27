@@ -1,10 +1,29 @@
 # Changelog
+## [0.3.10] - 2026-07-27
+
+### Bug Fixes
+
+- *(ci)* Proper merge sync of development with main after release
+- *(ci)* Proper merge sync of development with main after release
+## [0.3.9] - 2026-07-27
+
+### Bug Fixes
+
+- *(ci)* Use github.token instead of secrets.GH_PAT for sync step
+
+### Miscellaneous Tasks
+
+- Release v0.3.9
 ## [0.3.8] - 2026-07-27
 
 ### Bug Fixes
 
 - *(threads)* Persist token_expires_at to avoid 452 error on restart
 - *(threads)* Persist token_expires_at to avoid 452 error on restart
+
+### Miscellaneous Tasks
+
+- Release v0.3.8
 ## [0.3.7] - 2026-07-26
 
 ### Miscellaneous Tasks
