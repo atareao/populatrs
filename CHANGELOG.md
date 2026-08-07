@@ -1,9 +1,18 @@
 # Changelog
+## [0.4.5] - 2026-08-07
+
+### Features
+
+- Add repopulate option for failed publisher results
 ## [0.4.4] - 2026-07-27
 
 ### Bug Fixes
 
 - *(ci)* Use GH_PAT instead of GITHUB_TOKEN to trigger release workflow
+
+### Miscellaneous Tasks
+
+- Release v0.4.4
 ## [0.4.3] - 2026-07-27
 
 ### Miscellaneous Tasks
