@@ -4,6 +4,10 @@
 ### Features
 
 - Add repopulate option for failed publisher results
+
+### Miscellaneous Tasks
+
+- Release v0.4.5
 ## [0.4.4] - 2026-07-27
 
 ### Bug Fixes
