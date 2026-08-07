@@ -9,7 +9,8 @@ use tokio::sync::Mutex;
 
 use crate::models::{
     FeedConfig, FeedLogEntry, FeedLogPublisherResult, FeedLogResponse, FeedPublisherBinding,
-    FeedTypeConfig, PublishedPostInfo, PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
+    FeedTypeConfig, PublishedPostInfo, PublisherConfig, RetryPolicy, ScheduleConfig,
+    YouTubeGlobalConfig,
 };
 
 /// Database handle wrapping a SQLite connection.
@@ -736,6 +737,22 @@ impl Database {
     pub async fn set_log_retention(&self, days: u64) -> Result<()> {
         self.set_setting("log_retention_days", &days.to_string())
             .await
+    }
+
+    /// Get the retry policy from settings. Returns default if not set.
+    pub async fn get_retry_policy(&self) -> Result<RetryPolicy> {
+        match self.get_setting("retry_policy").await? {
+            Some(json_str) => serde_json::from_str(&json_str)
+                .map_err(|e| anyhow::anyhow!("Failed to parse retry policy: {e}")),
+            None => Ok(RetryPolicy::default()),
+        }
+    }
+
+    /// Set the retry policy in settings.
+    pub async fn set_retry_policy(&self, policy: &RetryPolicy) -> Result<()> {
+        let json_str = serde_json::to_string(policy)
+            .context("Failed to serialize retry policy")?;
+        self.set_setting("retry_policy", &json_str).await
     }
 
     // ───── Feed Cache ─────

@@ -274,39 +274,25 @@ pub async fn republish(
         }
     };
 
-    // 6. Attempt the republish.
+    // 6. Load retry policy and attempt the republish with retry.
+    let policy = state.db.get_retry_policy().await.unwrap_or_default();
+
     tracing::info!(
         guid = %guid,
         feed_id = %feed_id,
         publisher_id = %publisher_id,
-        "Republishing post"
+        "Republishing post with retry policy (max_retries={})",
+        policy.max_retries
     );
-    let result = publisher.publish(&post, template.as_deref()).await;
 
-    // 7. Record the outcome (replaces the previous result so the UI tag updates).
-    let (success, message) = match &result {
-        Ok(msg) => (true, msg.clone()),
-        Err(e) => (false, e.to_string()),
-    };
-
-    if let Err(e) = state
-        .db
-        .replace_publish_result(&guid, &feed_id, &publisher_id, success, Some(&message))
-        .await
-    {
-        tracing::error!(
-            guid = %guid,
-            feed_id = %feed_id,
-            publisher_id = %publisher_id,
-            error = %e,
-            "Failed to record republish result"
-        );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to record republish result: {e}")})),
-        )
-            .into_response();
-    }
+    let result = crate::publish_with_retry(
+        publisher,
+        &post,
+        template.as_deref(),
+        &policy,
+        &state.db,
+    )
+    .await;
 
     match result {
         Ok(msg) => {

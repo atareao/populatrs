@@ -34,6 +34,25 @@ pub struct StorageConfig {
     pub data_dir: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryPolicy {
+    pub max_retries: u32,
+    pub base_delay_seconds: u64,
+    pub max_delay_seconds: u64,
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            base_delay_seconds: 5,
+            max_delay_seconds: 300,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
