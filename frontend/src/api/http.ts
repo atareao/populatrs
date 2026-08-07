@@ -219,3 +219,19 @@ export async function fetchYoutubeConfig(): Promise<YouTubeConfig> {
 export async function updateYoutubeConfig(config: YouTubeConfig): Promise<void> {
   return fetcher("/api/youtube", { method: "PUT", body: config });
 }
+
+// Retry policy
+export interface RetryPolicy {
+  max_retries: number;
+  base_delay_seconds: number;
+  max_delay_seconds: number;
+  backoff_multiplier: number;
+}
+
+export async function fetchRetryPolicy(): Promise<RetryPolicy> {
+  return fetcher<RetryPolicy>("/api/settings/retry-policy");
+}
+
+export async function updateRetryPolicy(policy: RetryPolicy): Promise<void> {
+  return fetcher("/api/settings/retry-policy", { method: "PUT", body: policy });
+}

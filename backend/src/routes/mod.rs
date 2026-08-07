@@ -3,6 +3,7 @@ pub mod feeds;
 pub mod logs;
 pub mod oauth;
 pub mod publishers;
+pub mod retry;
 pub mod schedule;
 pub mod status;
 pub mod storage;
@@ -93,6 +94,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route(
             "/api/logs/retention",
             routing::get(logs::get_retention).put(logs::set_retention),
+        )
+        .route(
+            "/api/settings/retry-policy",
+            routing::get(retry::get_retry_policy).put(retry::update_retry_policy),
         )
         .layer(middleware::from_fn(require_auth));
 
