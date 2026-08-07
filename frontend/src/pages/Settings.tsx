@@ -3,6 +3,7 @@ import {
   Card,
   Form,
   Input,
+  InputNumber,
   Select,
   Button,
   Typography,
@@ -18,13 +19,17 @@ import {
   ClockCircleOutlined,
   GlobalOutlined,
   LinkOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons"
 import {
   fetchYoutubeConfig,
   updateYoutubeConfig,
   fetchSchedule,
   updateSchedule,
+  fetchRetryPolicy,
+  updateRetryPolicy,
   type ScheduleConfig,
+  type RetryPolicy,
 } from "../api/http"
 
 const { Title } = Typography
@@ -51,6 +56,9 @@ export default function Settings() {
   const [nextRunAt, setNextRunAt] = useState<string | null>(null)
   const [ytForm] = Form.useForm()
   const [schedForm] = Form.useForm()
+  const [retryPolicy, setRetryPolicy] = useState<RetryPolicy | null>(null)
+  const [retrySaving, setRetrySaving] = useState(false)
+  const [retryForm] = Form.useForm()
 
   useEffect(() => {
     Promise.all([
@@ -61,10 +69,14 @@ export default function Settings() {
         setCurrentTimezone(d.timezone)
         setNextRunAt(d.next_run_at ?? null)
       }),
+      fetchRetryPolicy().then((d) => {
+        retryForm.setFieldsValue(d)
+        setRetryPolicy(d)
+      }),
     ])
       .catch(() => message.error("Failed to load config"))
       .finally(() => setLoading(false))
-  }, [ytForm, schedForm])
+  }, [ytForm, schedForm, retryForm])
 
   const handleYtSubmit = async (values: { api_key: string }) => {
     setYtSaving(true)
@@ -90,6 +102,19 @@ export default function Settings() {
       message.error("Failed to update schedule")
     } finally {
       setSchedSaving(false)
+    }
+  }
+
+  const handleRetrySubmit = async (values: RetryPolicy) => {
+    setRetrySaving(true)
+    try {
+      await updateRetryPolicy(values)
+      setRetryPolicy(values)
+      message.success("Retry policy saved")
+    } catch {
+      message.error("Failed to save retry policy")
+    } finally {
+      setRetrySaving(false)
     }
   }
 
@@ -217,6 +242,71 @@ export default function Settings() {
             icon={<SaveOutlined />}
           >
             Save
+          </Button>
+        </Form>
+      </Card>
+
+      <Card
+        title={
+          <>
+            <ReloadOutlined /> Retry Policy
+          </>
+        }
+        style={{ maxWidth: 600, marginTop: 16 }}
+      >
+        <Alert
+          message="When a publish attempt fails, populatrs will automatically retry with exponential backoff."
+          type="info"
+          showIcon
+          icon={<InfoCircleOutlined />}
+          style={{ marginBottom: 20 }}
+        />
+        <Form
+          form={retryForm}
+          layout="vertical"
+          onFinish={handleRetrySubmit}
+          initialValues={{
+            max_retries: 3,
+            base_delay_seconds: 5,
+            max_delay_seconds: 300,
+            backoff_multiplier: 2.0,
+          }}
+        >
+          <Form.Item
+            name="max_retries"
+            label="Max Retries"
+            rules={[{ required: true, message: "Required" }]}
+          >
+            <InputNumber min={0} max={10} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            name="base_delay_seconds"
+            label="Base Delay (seconds)"
+            rules={[{ required: true, message: "Required" }]}
+          >
+            <InputNumber min={1} max={3600} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            name="max_delay_seconds"
+            label="Max Delay (seconds)"
+            rules={[{ required: true, message: "Required" }]}
+          >
+            <InputNumber min={1} max={86400} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            name="backoff_multiplier"
+            label="Backoff Multiplier"
+            rules={[{ required: true, message: "Required" }]}
+          >
+            <InputNumber min={1} max={10} step={0.1} style={{ width: "100%" }} />
+          </Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={retrySaving}
+            icon={<SaveOutlined />}
+          >
+            Save Retry Policy
           </Button>
         </Form>
       </Card>
