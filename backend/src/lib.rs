@@ -99,9 +99,16 @@ pub async fn run_feed_check(
                     }
 
                     // Mark as published in DB first (FK reference for publish_results)
-                    db.mark_post_published(&post.guid, &post.feed_id, &post.title, &post.url, None)
-                        .await
-                        .ok();
+                    db.mark_post_published(
+                        &post.guid,
+                        &post.feed_id,
+                        &post.title,
+                        &post.url,
+                        None,
+                        post.description.as_deref(),
+                    )
+                    .await
+                    .ok();
 
                     let results = publisher_manager
                         .publish_to_all(&post, &pub_ids, &feed_templates)

@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 use crate::models::{
     FeedConfig, FeedLogEntry, FeedLogPublisherResult, FeedLogResponse, FeedPublisherBinding,
-    FeedTypeConfig, PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
+    FeedTypeConfig, PublishedPostInfo, PublisherConfig, ScheduleConfig, YouTubeGlobalConfig,
 };
 
 /// Database handle wrapping a SQLite connection.
@@ -115,6 +115,9 @@ impl Database {
 
         // Migration: add template column to feed_publishers for existing databases
         let _ = conn.execute_batch("ALTER TABLE feed_publishers ADD COLUMN template TEXT;");
+
+        // Migration: add description column to published_posts for existing databases
+        let _ = conn.execute_batch("ALTER TABLE published_posts ADD COLUMN description TEXT;");
 
         Ok(())
     }
@@ -470,16 +473,85 @@ impl Database {
         title: &str,
         url: &str,
         content_hash: Option<&str>,
+        description: Option<&str>,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT OR IGNORE INTO published_posts (guid, feed_id, title, url, content_hash, published_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![guid, feed_id, title, url, content_hash, now],
+            "INSERT OR IGNORE INTO published_posts (guid, feed_id, title, url, content_hash, description, published_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![guid, feed_id, title, url, content_hash, description, now],
         )
         .context("Failed to mark post as published")?;
         Ok(())
+    }
+
+    /// Get a published post's title, url and description by guid + feed_id.
+    pub async fn get_published_post(
+        &self,
+        guid: &str,
+        feed_id: &str,
+    ) -> Result<Option<PublishedPostInfo>> {
+        let conn = self.conn.lock().await;
+        let post = conn
+            .query_row(
+                "SELECT title, url, description FROM published_posts WHERE guid = ?1 AND feed_id = ?2",
+                params![guid, feed_id],
+                |row| {
+                    Ok(PublishedPostInfo {
+                        title: row.get(0)?,
+                        url: row.get(1)?,
+                        description: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .context("Failed to query published post")?;
+        Ok(post)
+    }
+
+    /// Replace the publish result for a (guid, feed_id, publisher_id) triple.
+    /// Deletes any existing result and inserts the new one, so a republish
+    /// attempt updates the tag shown in the UI.
+    pub async fn replace_publish_result(
+        &self,
+        guid: &str,
+        feed_id: &str,
+        publisher_id: &str,
+        success: bool,
+        message: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.conn.lock().await;
+        // Wrap the delete+insert in an explicit transaction so a failure in the
+        // INSERT cannot leave the previous result lost.
+        conn.execute("BEGIN", [])
+            .context("Failed to begin transaction")?;
+        let result = (|| -> Result<()> {
+            conn.execute(
+                "DELETE FROM publish_results WHERE guid = ?1 AND feed_id = ?2 AND publisher_id = ?3",
+                params![guid, feed_id, publisher_id],
+            )
+            .context("Failed to delete existing publish result")?;
+            conn.execute(
+                "INSERT INTO publish_results (guid, feed_id, publisher_id, success, message, published_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![guid, feed_id, publisher_id, success as i32, message, now],
+            )
+            .context("Failed to insert publish result")?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                conn.execute("COMMIT", [])
+                    .context("Failed to commit transaction")?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
     }
 
     /// Record a publish result for a specific publisher.
@@ -1016,9 +1088,16 @@ mod tests {
     async fn test_published_posts() {
         let (db, _dir) = test_db().await;
         assert!(!db.is_post_published("guid-1", "feed-1").await.unwrap());
-        db.mark_post_published("guid-1", "feed-1", "Test Post", "https://ex.com", None)
-            .await
-            .unwrap();
+        db.mark_post_published(
+            "guid-1",
+            "feed-1",
+            "Test Post",
+            "https://ex.com",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert!(db.is_post_published("guid-1", "feed-1").await.unwrap());
     }
 

@@ -15,6 +15,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use crate::auth::{AppState, LogEntry};
+use crate::models::Post;
 
 // ───── SSE log stream (real-time) ─────
 
@@ -181,5 +182,162 @@ pub async fn set_retention(
             Json(json!({"error": format!("Failed to set retention: {e}")})),
         )
             .into_response(),
+    }
+}
+
+// ───── Republish a single post to a single publisher ─────
+
+#[derive(Deserialize)]
+pub struct RepublishRequest {
+    pub guid: String,
+    pub feed_id: String,
+    pub publisher_id: String,
+}
+
+/// POST /api/logs/republish — retries publishing a specific post to a single
+/// publisher, updating the stored publish result so the UI tag refreshes.
+pub async fn republish(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<RepublishRequest>,
+) -> impl IntoResponse {
+    let guid = body.guid;
+    let feed_id = body.feed_id;
+    let publisher_id = body.publisher_id;
+
+    // 1. The post must have been published before (we need its title/url/description).
+    let published = match state.db.get_published_post(&guid, &feed_id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Published post not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(guid = %guid, feed_id = %feed_id, error = %e, "Failed to load published post for republish");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to load published post: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    // 2. The feed must still exist (to locate the per-feed template override).
+    let feed = match state.db.get_feed(&feed_id).await {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Feed not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(feed_id = %feed_id, error = %e, "Failed to load feed for republish");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to load feed: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    // 3. Locate the per-feed template override for this publisher (if any).
+    let template = feed
+        .publishers
+        .iter()
+        .find(|b| b.publisher_id == publisher_id)
+        .and_then(|b| b.template.clone())
+        .filter(|t| !t.is_empty());
+
+    // 4. Rebuild the post from the persisted data.
+    let post = Post::new(
+        guid.clone(),
+        published.title,
+        published.description,
+        published.url,
+        chrono::Utc::now(),
+        feed_id.clone(),
+    );
+
+    // 5. Resolve the publisher instance.
+    let publisher = match state.publisher_manager.get_publisher(&publisher_id) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("Publisher '{}' not found", publisher_id)})),
+            )
+                .into_response();
+        }
+    };
+
+    // 6. Attempt the republish.
+    tracing::info!(
+        guid = %guid,
+        feed_id = %feed_id,
+        publisher_id = %publisher_id,
+        "Republishing post"
+    );
+    let result = publisher.publish(&post, template.as_deref()).await;
+
+    // 7. Record the outcome (replaces the previous result so the UI tag updates).
+    let (success, message) = match &result {
+        Ok(msg) => (true, msg.clone()),
+        Err(e) => (false, e.to_string()),
+    };
+
+    if let Err(e) = state
+        .db
+        .replace_publish_result(&guid, &feed_id, &publisher_id, success, Some(&message))
+        .await
+    {
+        tracing::error!(
+            guid = %guid,
+            feed_id = %feed_id,
+            publisher_id = %publisher_id,
+            error = %e,
+            "Failed to record republish result"
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to record republish result: {e}")})),
+        )
+            .into_response();
+    }
+
+    match result {
+        Ok(msg) => {
+            tracing::info!(
+                guid = %guid,
+                feed_id = %feed_id,
+                publisher_id = %publisher_id,
+                "Republish succeeded"
+            );
+            (
+                StatusCode::OK,
+                Json(json!({"status": "ok", "success": true, "message": msg})),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            // A failed publish attempt is a valid business outcome, not a server
+            // error. Return 200 with success=false so the UI can surface the real
+            // reason to the user.
+            tracing::error!(
+                guid = %guid,
+                feed_id = %feed_id,
+                publisher_id = %publisher_id,
+                error = %e,
+                "Republish failed"
+            );
+            (
+                StatusCode::OK,
+                Json(json!({"status": "error", "success": false, "message": e.to_string()})),
+            )
+                .into_response()
+        }
     }
 }

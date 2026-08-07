@@ -194,6 +194,14 @@ export async function updateLogRetention(days: number): Promise<{ status: string
   return fetcher("/api/logs/retention", { method: "PUT", body: { retention_days: days } });
 }
 
+export async function republishPost(
+  guid: string,
+  feed_id: string,
+  publisher_id: string,
+): Promise<{ status: string; success: boolean; message: string }> {
+  return fetcher("/api/logs/republish", { method: "POST", body: { guid, feed_id, publisher_id } });
+}
+
 // Status
 export async function fetchStatus(): Promise<DashboardStatus> {
   return fetcher("/api/status");
