@@ -70,7 +70,14 @@ pub async fn create(
                     for post in &initial_posts {
                         state
                             .db
-                            .mark_post_published(&post.guid, &feed.id, &post.title, &post.url, None)
+                            .mark_post_published(
+                                &post.guid,
+                                &feed.id,
+                                &post.title,
+                                &post.url,
+                                None,
+                                post.description.as_deref(),
+                            )
                             .await
                             .ok();
                     }
@@ -250,6 +257,7 @@ pub async fn run(
                             &post.title,
                             &post.url,
                             None,
+                            post.description.as_deref(),
                         )
                         .await
                         .ok();
@@ -289,6 +297,7 @@ pub async fn run(
                             &post.title,
                             &post.url,
                             None,
+                            post.description.as_deref(),
                         )
                         .await
                         .ok();
@@ -431,7 +440,7 @@ pub async fn publish(
         // Mark as published (idempotent, already done in preview run)
         let _ = state
             .db
-            .mark_post_published(guid, &id, title, url, None)
+            .mark_post_published(guid, &id, title, url, None, None)
             .await;
 
         published += 1;

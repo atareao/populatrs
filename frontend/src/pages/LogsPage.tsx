@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  Typography, Tag, Empty, Spin, Table, Tooltip, InputNumber, Button, message,
+  Typography, Tag, Empty, Spin, Table, Tooltip, InputNumber, Button, Dropdown, message,
 } from "antd";
 import {
-  CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, SaveOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, SaveOutlined, RedoOutlined,
 } from "@ant-design/icons";
 import {
-  fetchFeedLogs, updateLogRetention, fetchLogRetention,
+  fetchFeedLogs, updateLogRetention, fetchLogRetention, republishPost,
   type FeedLogEntry, type FeedLogResponse,
 } from "../api/http";
 
@@ -29,6 +29,7 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(true);
   const [retentionDays, setRetentionDays] = useState(30);
   const [savingRetention, setSavingRetention] = useState(false);
+  const [republishing, setRepublishing] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -68,6 +69,24 @@ export default function LogsPage() {
     }
   };
 
+  const handleRepopulate = async (guid: string, feedId: string, publisherId: string) => {
+    const key = `${guid}-${feedId}-${publisherId}`;
+    setRepublishing(key);
+    try {
+      const result = await republishPost(guid, feedId, publisherId);
+      if (result.success) {
+        message.success("Repopulate successful");
+      } else {
+        message.error(result.message || "Repopulate failed");
+      }
+    } catch {
+      message.error("Repopulate failed");
+    } finally {
+      setRepublishing(null);
+      loadData();
+    }
+  };
+
   const columns = [
     {
       title: "Date",
@@ -103,11 +122,15 @@ export default function LogsPage() {
           {record.publisher_results.length === 0 ? (
             <Text type="secondary" style={{ fontSize: 11 }}>No publishers</Text>
           ) : (
-            record.publisher_results.map((r, i) => (
-              <Tooltip key={i} title={r.message}>
+            record.publisher_results.map((r, i) => {
+              const tag = (
                 <Tag
                   color={r.success ? "green" : "red"}
-                  style={{ fontSize: 11, cursor: "default" }}
+                  tabIndex={r.success ? undefined : 0}
+                  role={r.success ? undefined : "button"}
+                  aria-haspopup={r.success ? undefined : "menu"}
+                  aria-label={r.success ? undefined : `Repopulate ${r.publisher_id}`}
+                  style={{ fontSize: 11, cursor: r.success ? "default" : "pointer" }}
                 >
                   {r.success ? (
                     <CheckCircleOutlined style={{ marginRight: 2 }} />
@@ -116,8 +139,35 @@ export default function LogsPage() {
                   )}
                   {r.publisher_id}
                 </Tag>
-              </Tooltip>
-            ))
+              );
+
+              const wrappedTag = r.success ? (
+                tag
+              ) : (
+                <Dropdown
+                  trigger={["click"]}
+                  menu={{
+                    items: [
+                      {
+                        key: "repopulate",
+                        label: "Repopulate",
+                        icon: <RedoOutlined />,
+                        disabled: republishing === `${record.guid}-${record.feed_id}-${r.publisher_id}`,
+                        onClick: () => handleRepopulate(record.guid, record.feed_id, r.publisher_id),
+                      },
+                    ],
+                  }}
+                >
+                  {tag}
+                </Dropdown>
+              );
+
+              return (
+                <Tooltip key={i} title={r.message}>
+                  {wrappedTag}
+                </Tooltip>
+              );
+            })
           )}
         </div>
       ),

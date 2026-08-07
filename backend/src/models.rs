@@ -181,6 +181,15 @@ impl PublisherConfig {
 
 // ───── Published Posts ─────
 
+/// Minimal info about a published post, used to republish it to a single
+/// publisher from the Publication History view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishedPostInfo {
+    pub title: String,
+    pub url: String,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublishedPost {
     pub post_guid: String,

@@ -89,6 +89,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/api/status", routing::get(status::dashboard))
         .route("/api/logs/stream", routing::get(logs::stream))
         .route("/api/logs/history", routing::get(logs::history))
+        .route("/api/logs/republish", routing::post(logs::republish))
         .route(
             "/api/logs/retention",
             routing::get(logs::get_retention).put(logs::set_retention),
