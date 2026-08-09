@@ -1,4 +1,14 @@
 # Changelog
+## [0.4.7] - 2026-08-09
+
+### Bug Fixes
+
+- Add structured error logging with request/response context to all publishers
+## [0.4.6] - 2026-08-07
+
+### Miscellaneous Tasks
+
+- Release v0.4.6
 ## [0.4.5] - 2026-08-07
 
 ### Features
