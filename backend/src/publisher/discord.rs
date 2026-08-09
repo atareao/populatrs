@@ -87,6 +87,14 @@ impl Publisher for DiscordPublisher {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
 
+            tracing::error!(
+                publisher_id = %self.id,
+                request_body = %serde_json::to_string(&payload).unwrap_or_default(),
+                response_status = %status,
+                response_body = %error_text,
+                "Failed to publish to Discord"
+            );
+
             // Discord rate limiting
             if status.as_u16() == 429 {
                 return Err(anyhow::anyhow!(

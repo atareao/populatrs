@@ -79,6 +79,13 @@ impl Publisher for MatrixPublisher {
         } else {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            tracing::error!(
+                publisher_id = %self.id,
+                request_body = %serde_json::to_string(&payload).unwrap_or_default(),
+                response_status = %status,
+                response_body = %body,
+                "Failed to publish to Matrix"
+            );
             Err(anyhow::anyhow!(
                 "Failed to publish to Matrix: {} — {}",
                 status,

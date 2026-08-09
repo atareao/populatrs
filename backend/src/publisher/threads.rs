@@ -328,6 +328,14 @@ impl Publisher for ThreadsPublisher {
         if !container_response.status().is_success() {
             let status = container_response.status();
             let error_text = container_response.text().await.unwrap_or_default();
+            tracing::error!(
+                publisher_id = %self.id,
+                text_sent = %text,
+                request_body = %serde_json::to_string(&container_payload).unwrap_or_default(),
+                response_status = %status,
+                response_body = %error_text,
+                "Failed to create Threads container"
+            );
             return Err(anyhow::anyhow!(
                 "Failed to create Threads container: {} - {}",
                 status,
@@ -400,6 +408,14 @@ impl Publisher for ThreadsPublisher {
                 } else {
                     let retry_status = retry_response.status();
                     let retry_error = retry_response.text().await.unwrap_or_default();
+                    tracing::error!(
+                        publisher_id = %self.id,
+                        text_sent = %text,
+                        request_body = %serde_json::to_string(&publish_payload).unwrap_or_default(),
+                        response_status = %retry_status,
+                        response_body = %retry_error,
+                        "Failed to publish to Threads after retry"
+                    );
                     Err(anyhow::anyhow!(
                         "Failed to publish to Threads after retry: {} - {}",
                         retry_status,
@@ -407,6 +423,14 @@ impl Publisher for ThreadsPublisher {
                     ))
                 }
             } else {
+                tracing::error!(
+                    publisher_id = %self.id,
+                    text_sent = %text,
+                    request_body = %serde_json::to_string(&publish_payload).unwrap_or_default(),
+                    response_status = %status,
+                    response_body = %error_text,
+                    "Failed to publish to Threads"
+                );
                 Err(anyhow::anyhow!(
                     "Failed to publish to Threads: {} - {}",
                     status,
