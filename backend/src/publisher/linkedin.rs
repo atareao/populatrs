@@ -362,7 +362,14 @@ impl LinkedInPublisher {
             Ok(format!("Published to LinkedIn: {}", post_id))
         } else {
             let error_body = response.text().await.unwrap_or_default();
-            tracing::error!("LinkedIn Posts API error: {} - {}", status, error_body);
+            tracing::error!(
+                publisher_id = %self.id,
+                commentary_sent = %commentary,
+                request_body = %serde_json::to_string(&payload).unwrap_or_default(),
+                response_status = %status,
+                response_body = %error_body,
+                "Failed to publish to LinkedIn (Posts API)"
+            );
             Err(anyhow::anyhow!(
                 "Failed to publish to LinkedIn (Posts API): {} - {}",
                 status,
@@ -433,7 +440,14 @@ impl LinkedInPublisher {
             Ok(format!("Published to LinkedIn: {}", post_id))
         } else {
             let error_body = response.text().await.unwrap_or_default();
-            tracing::error!("LinkedIn UGC API error: {} - {}", status, error_body);
+            tracing::error!(
+                publisher_id = %self.id,
+                commentary_sent = %commentary,
+                request_body = %serde_json::to_string(&payload).unwrap_or_default(),
+                response_status = %status,
+                response_body = %error_body,
+                "Failed to publish to LinkedIn (UGC API)"
+            );
 
             // Si el error es 403 con ACCESS_DENIED en /author, probablemente
             // el sub de OpenID Connect no es el person_id legacy. Intentar

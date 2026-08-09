@@ -71,20 +71,38 @@ impl Publisher for OpenObservePublisher {
             "formatted_message": formatted_message
         });
 
+        let payload_body = vec![log_entry];
+
+        tracing::debug!(
+            publisher_id = %self.id,
+            payload = %serde_json::to_string(&payload_body).unwrap_or_default(),
+            "Sending to OpenObserve"
+        );
+
         let response = self
             .client
             .post(&url)
             .header("Authorization", format!("Basic {}", self.access_token))
-            .json(&vec![log_entry])
+            .json(&payload_body)
             .send()
             .await?;
 
         if response.status().is_success() {
             Ok(format!("Published to OpenObserve: {}", post.guid))
         } else {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            tracing::error!(
+                publisher_id = %self.id,
+                request_body = %serde_json::to_string(&payload_body).unwrap_or_default(),
+                response_status = %status,
+                response_body = %body,
+                "Failed to publish to OpenObserve"
+            );
             Err(anyhow::anyhow!(
-                "Failed to publish to OpenObserve: {}",
-                response.status()
+                "Failed to publish to OpenObserve: {} - {}",
+                status,
+                body
             ))
         }
     }
