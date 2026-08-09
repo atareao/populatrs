@@ -231,9 +231,19 @@ impl Publisher for MastodonPublisher {
             let result: Value = response.json().await?;
             Ok(format!("Published to Mastodon: {}", result["id"]))
         } else {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            tracing::error!(
+                publisher_id = %self.id,
+                request_body = %serde_json::to_string(&payload).unwrap_or_default(),
+                response_status = %status,
+                response_body = %body,
+                "Failed to publish to Mastodon"
+            );
             Err(anyhow::anyhow!(
-                "Failed to publish to Mastodon: {}",
-                response.status()
+                "Failed to publish to Mastodon: {} - {}",
+                status,
+                body
             ))
         }
     }

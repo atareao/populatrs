@@ -377,7 +377,14 @@ impl Publisher for XPublisher {
             Ok(format!("Published to X: {}", tweet_id))
         } else {
             let error_body = response.text().await.unwrap_or_default();
-            tracing::error!("X API v2 OAuth 2.0 Error Response: {}", error_body);
+            tracing::error!(
+                publisher_id = %self.id,
+                text_sent = %tweet_text,
+                request_body = %serde_json::to_string(&tweet_data).unwrap_or_default(),
+                response_status = %status,
+                response_body = %error_body,
+                "Failed to publish to X"
+            );
 
             // Si el error es de autenticación, intentar renovar token
             if status.as_u16() == 401 {
@@ -415,7 +422,14 @@ impl Publisher for XPublisher {
                             ))
                         } else {
                             let error_body = retry_response.text().await.unwrap_or_default();
-                            tracing::error!("X API v2 retry failed: {}", error_body);
+                            tracing::error!(
+                                publisher_id = %self.id,
+                                text_sent = %tweet_text,
+                                request_body = %serde_json::to_string(&tweet_data).unwrap_or_default(),
+                                response_status = %retry_status,
+                                response_body = %error_body,
+                                "Failed to publish to X after token refresh"
+                            );
                             Err(anyhow::anyhow!(
                                 "Failed to publish to X after token refresh: {} - {}",
                                 retry_status,
