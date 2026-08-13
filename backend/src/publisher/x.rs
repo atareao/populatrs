@@ -22,6 +22,7 @@ pub struct XPublisher {
     pub refresh_token: Arc<Mutex<Option<String>>>,
     pub redirect_uri: String,
     pub template: String,
+    pub reply_template: String,
     client: Client,
     renderer: TemplateRenderer,
     pub config_file_path: Option<String>,
@@ -38,10 +39,13 @@ impl XPublisher {
         refresh_token: Option<String>,
         redirect_uri: Option<String>,
         template: String,
+        reply_template: Option<String>,
         config_file_path: Option<String>,
         db: Option<Arc<Database>>,
     ) -> Self {
         let redirect_uri = redirect_uri.unwrap_or_else(|| "https://127.0.0.1".to_string());
+        let reply_template =
+            reply_template.unwrap_or_else(|| "Puedes verlo en {{ url }}".to_string());
 
         Self {
             id,
@@ -51,6 +55,7 @@ impl XPublisher {
             refresh_token: Arc::new(Mutex::new(refresh_token)),
             redirect_uri,
             template,
+            reply_template,
             client: Client::new(),
             renderer: TemplateRenderer::new(),
             config_file_path,
@@ -304,6 +309,7 @@ impl XPublisher {
                 refresh_token: refresh_token.map(|s| s.to_string()),
                 redirect_uri: Some(self.redirect_uri.clone()),
                 template: self.template.clone(),
+                reply_template: Some(self.reply_template.clone()),
             };
             db.upsert_publisher(&self.id, &config, true).await?;
             tracing::info!("Persisted X tokens to database for '{}'", self.id);
@@ -316,48 +322,11 @@ impl XPublisher {
 
         Ok(())
     }
-}
-#[async_trait]
-impl Publisher for XPublisher {
-    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
-        let template_str = feed_template
-            .filter(|t| !t.is_empty())
-            .unwrap_or(&self.template);
-        let context = TemplateContext {
-            title: post.title.clone(),
-            description: post.description.clone().unwrap_or_default(),
-            url: post.url.clone(),
-        };
 
-        let tweet_text = self.renderer.render(template_str, &context)?;
-
-        // Truncate to Twitter's character limit
-        let tweet_text = if tweet_text.len() > 280 {
-            format!("{}...", &tweet_text[..277])
-        } else {
-            tweet_text
-        };
-
-        tracing::info!(
-            "Attempting to publish to X with OAuth 2.0: '{}'",
-            tweet_text
-        );
-
-        // Obtener token de acceso válido
-        let access_token = match self.get_valid_access_token().await {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to get valid access token: {}", e);
-                return Err(e);
-            }
-        };
-
-        // Usar X API v2 con OAuth 2.0
+    /// Post a single tweet (text-only) and return the tweet ID.
+    async fn post_tweet(&self, access_token: &str, text: &str) -> Result<String> {
         let url = "https://api.twitter.com/2/tweets";
-
-        let tweet_data = json!({
-            "text": tweet_text
-        });
+        let tweet_data = json!({ "text": text });
 
         let response = self
             .client
@@ -369,100 +338,217 @@ impl Publisher for XPublisher {
             .await?;
 
         let status = response.status();
-        tracing::info!("X API v2 OAuth 2.0 response status: {}", status);
+        tracing::info!("X post tweet response status: {}", status);
 
         if status.is_success() {
             let result: Value = response.json().await?;
-            let tweet_id = result["data"]["id"].as_str().unwrap_or("unknown");
-            Ok(format!("Published to X: {}", tweet_id))
+            let tweet_id = result["data"]["id"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("No tweet ID in response"))?
+                .to_string();
+            Ok(tweet_id)
         } else {
             let error_body = response.text().await.unwrap_or_default();
-            tracing::error!(
-                publisher_id = %self.id,
-                text_sent = %tweet_text,
-                request_body = %serde_json::to_string(&tweet_data).unwrap_or_default(),
-                response_status = %status,
-                response_body = %error_body,
-                "Failed to publish to X"
-            );
+            Err(anyhow::anyhow!(
+                "Failed to post tweet: {} - {}",
+                status,
+                error_body
+            ))
+        }
+    }
 
-            // Si el error es de autenticación, intentar renovar token
-            if status.as_u16() == 401 {
-                tracing::info!("Access token expired, attempting to refresh...");
+    /// Post a reply tweet (in reply to an existing tweet) and return the tweet ID.
+    async fn post_reply(
+        &self,
+        access_token: &str,
+        text: &str,
+        in_reply_to_id: &str,
+    ) -> Result<String> {
+        let url = "https://api.twitter.com/2/tweets";
+        let reply_data = json!({
+            "text": text,
+            "reply": {
+                "in_reply_to_tweet_id": in_reply_to_id
+            }
+        });
 
-                match self.refresh_access_token().await {
-                    Ok((new_access_token, new_refresh_token)) => {
-                        // Guardar tokens actualizados
-                        if let Err(e) = self
-                            .save_tokens_to_config(&new_access_token, Some(&new_refresh_token))
-                            .await
-                        {
-                            tracing::warn!("Failed to save refreshed tokens: {}", e);
-                        }
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .json(&reply_data)
+            .send()
+            .await?;
 
-                        // Reintentar publicación con nuevo token
-                        let retry_response = self
-                            .client
-                            .post(url)
-                            .header("Authorization", format!("Bearer {}", new_access_token))
-                            .header("Content-Type", "application/json")
-                            .json(&tweet_data)
-                            .send()
-                            .await?;
+        let status = response.status();
+        tracing::info!("X post reply response status: {}", status);
 
-                        let retry_status = retry_response.status();
-                        tracing::info!("X API v2 retry response status: {}", retry_status);
+        if status.is_success() {
+            let result: Value = response.json().await?;
+            let reply_id = result["data"]["id"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("No reply ID in response"))?
+                .to_string();
+            Ok(reply_id)
+        } else {
+            let error_body = response.text().await.unwrap_or_default();
+            Err(anyhow::anyhow!(
+                "Failed to post reply: {} - {}",
+                status,
+                error_body
+            ))
+        }
+    }
 
-                        if retry_status.is_success() {
-                            let result: Value = retry_response.json().await?;
-                            let tweet_id = result["data"]["id"].as_str().unwrap_or("unknown");
-                            Ok(format!(
-                                "Published to X (after token refresh): {}",
-                                tweet_id
-                            ))
-                        } else {
-                            let error_body = retry_response.text().await.unwrap_or_default();
-                            tracing::error!(
-                                publisher_id = %self.id,
-                                text_sent = %tweet_text,
-                                request_body = %serde_json::to_string(&tweet_data).unwrap_or_default(),
-                                response_status = %retry_status,
-                                response_body = %error_body,
-                                "Failed to publish to X after token refresh"
-                            );
-                            Err(anyhow::anyhow!(
-                                "Failed to publish to X after token refresh: {} - {}",
-                                retry_status,
-                                error_body
-                            ))
-                        }
+    /// Attempt to post a tweet with automatic token refresh on 401.
+    async fn post_tweet_with_retry(&self, access_token: &str, text: &str) -> Result<String> {
+        match self.post_tweet(access_token, text).await {
+            Ok(tweet_id) => Ok(tweet_id),
+            Err(e) => {
+                // Check if the error is a 401 (unauthorized) — try refreshing token
+                let err_msg = e.to_string();
+                if err_msg.contains("401") {
+                    tracing::info!("Access token expired, attempting to refresh...");
+                    let (new_token, new_refresh) = self.refresh_access_token().await?;
+                    if let Err(e) = self
+                        .save_tokens_to_config(&new_token, Some(&new_refresh))
+                        .await
+                    {
+                        tracing::warn!("Failed to save refreshed tokens: {}", e);
                     }
-                    Err(refresh_error) => {
-                        tracing::error!("Failed to refresh X token: {}", refresh_error);
-                        Err(anyhow::anyhow!(
-                            "Failed to publish to X - token refresh failed: {}",
-                            refresh_error
-                        ))
-                    }
+                    self.post_tweet(&new_token, text).await
+                } else {
+                    Err(e)
                 }
-            } else {
-                // Parse error para mejor diagnóstico
-                if let Ok(error_json) = serde_json::from_str::<Value>(&error_body) {
-                    if let Some(errors) = error_json.get("errors") {
-                        tracing::error!("X API Errors: {:#}", errors);
-                    }
-                    if let Some(detail) = error_json.get("detail") {
-                        tracing::error!("X API Detail: {}", detail);
-                    }
-                    if let Some(title) = error_json.get("title") {
-                        tracing::error!("X API Title: {}", title);
-                    }
-                }
+            }
+        }
+    }
 
-                Err(anyhow::anyhow!(
-                    "Failed to publish to X: {} - {}",
-                    status,
-                    error_body
+    /// Attempt to post a reply with automatic token refresh on 401.
+    async fn post_reply_with_retry(
+        &self,
+        access_token: &str,
+        text: &str,
+        in_reply_to_id: &str,
+    ) -> Result<String> {
+        match self.post_reply(access_token, text, in_reply_to_id).await {
+            Ok(reply_id) => Ok(reply_id),
+            Err(e) => {
+                let err_msg = e.to_string();
+                if err_msg.contains("401") {
+                    tracing::info!("Access token expired, attempting to refresh...");
+                    let (new_token, new_refresh) = self.refresh_access_token().await?;
+                    if let Err(e) = self
+                        .save_tokens_to_config(&new_token, Some(&new_refresh))
+                        .await
+                    {
+                        tracing::warn!("Failed to save refreshed tokens: {}", e);
+                    }
+                    self.post_reply(&new_token, text, in_reply_to_id).await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+#[async_trait]
+impl Publisher for XPublisher {
+    async fn publish(&self, post: &Post, feed_template: Option<&str>) -> Result<String> {
+        // ── 1. Render main tweet text (without URL) ──
+        let template_str = feed_template
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.template);
+        let context = TemplateContext {
+            title: post.title.clone(),
+            description: post.description.clone().unwrap_or_default(),
+            url: post.url.clone(),
+        };
+
+        let main_text = self.renderer.render(template_str, &context)?;
+
+        // Truncate to Twitter's character limit
+        let main_text = if main_text.len() > 280 {
+            format!("{}...", &main_text[..277])
+        } else {
+            main_text
+        };
+
+        tracing::info!("X two-step publish — main tweet: '{}'", main_text);
+
+        // ── 2. Get valid access token ──
+        let access_token = match self.get_valid_access_token().await {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to get valid access token: {}", e);
+                return Err(e);
+            }
+        };
+
+        // ── 3. Post main tweet (text only) ──
+        let main_tweet_id = match self.post_tweet_with_retry(&access_token, &main_text).await {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::error!(
+                    publisher_id = %self.id,
+                    text_sent = %main_text,
+                    "Failed to publish main tweet to X"
+                );
+                return Err(e);
+            }
+        };
+
+        tracing::info!("Main tweet published successfully — ID: {}", main_tweet_id);
+
+        // ── 4. Render reply text (CTA + URL) ──
+        let reply_context = TemplateContext {
+            title: post.title.clone(),
+            description: post.description.clone().unwrap_or_default(),
+            url: post.url.clone(),
+        };
+        let reply_text = self.renderer.render(&self.reply_template, &reply_context)?;
+
+        // Truncate reply to Twitter's character limit
+        let reply_text = if reply_text.len() > 280 {
+            format!("{}...", &reply_text[..277])
+        } else {
+            reply_text
+        };
+
+        tracing::info!(
+            "X two-step publish — reply tweet: '{}' (in reply to: {})",
+            reply_text,
+            main_tweet_id
+        );
+
+        // ── 5. Small delay to ensure sequential execution ──
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // ── 6. Post reply with URL ──
+        match self
+            .post_reply_with_retry(&access_token, &reply_text, &main_tweet_id)
+            .await
+        {
+            Ok(reply_id) => {
+                tracing::info!("Reply tweet published successfully — ID: {}", reply_id);
+                Ok(format!(
+                    "Published to X: main={}, reply={}",
+                    main_tweet_id, reply_id
+                ))
+            }
+            Err(e) => {
+                // Step 1 succeeded but Step 2 failed — log main_tweet_id for retry
+                tracing::error!(
+                    publisher_id = %self.id,
+                    main_tweet_id = %main_tweet_id,
+                    reply_text = %reply_text,
+                    error = %e,
+                    "Failed to publish reply tweet. Main tweet ID preserved for retry."
+                );
+                Ok(format!(
+                    "Published to X (reply failed): main={}, error={}",
+                    main_tweet_id, e
                 ))
             }
         }

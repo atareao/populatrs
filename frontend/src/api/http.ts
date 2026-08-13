@@ -22,7 +22,7 @@ export interface FeedConfig {
 
 export interface PublisherConfigEntry {
   type: string;
-  config: Record<string, unknown> & { template?: string };
+  config: Record<string, unknown> & { template?: string; reply_template?: string };
   enabled: boolean;
 }
 

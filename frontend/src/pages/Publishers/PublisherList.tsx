@@ -347,6 +347,16 @@ export default function PublisherList() {
               >
                 <Input.TextArea rows={6} placeholder="📰 *{{ title }}* - {{ url }}" />
               </Form.Item>
+
+              {selectedType === "X" && (
+                <Form.Item
+                  name={["config", "reply_template"]}
+                  label="Reply Template"
+                  extra="Use {{ url }} variable. This is posted as a reply to the main tweet with the URL."
+                >
+                  <Input.TextArea rows={4} placeholder="Puedes verlo en {{ url }}" />
+                </Form.Item>
+              )}
         </Form>
       </Modal>
 

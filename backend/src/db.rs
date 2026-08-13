@@ -750,8 +750,7 @@ impl Database {
 
     /// Set the retry policy in settings.
     pub async fn set_retry_policy(&self, policy: &RetryPolicy) -> Result<()> {
-        let json_str = serde_json::to_string(policy)
-            .context("Failed to serialize retry policy")?;
+        let json_str = serde_json::to_string(policy).context("Failed to serialize retry policy")?;
         self.set_setting("retry_policy", &json_str).await
     }
 
