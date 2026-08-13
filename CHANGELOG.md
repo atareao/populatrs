@@ -1,9 +1,24 @@
 # Changelog
+## [0.4.8] - 2026-08-13
+
+### Documentation
+
+- Add crate metadata (readme, homepage, keywords, categories)
+
+### Features
+
+- Add retry policy with exponential backoff for publishing (#31)
+- Two-step X publishing with reply thread
+- Two-step X publishing with reply thread
 ## [0.4.7] - 2026-08-09
 
 ### Bug Fixes
 
 - Add structured error logging with request/response context to all publishers
+
+### Miscellaneous Tasks
+
+- Release v0.4.7
 ## [0.4.6] - 2026-08-07
 
 ### Miscellaneous Tasks
