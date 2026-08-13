@@ -285,14 +285,8 @@ pub async fn republish(
         policy.max_retries
     );
 
-    let result = crate::publish_with_retry(
-        publisher,
-        &post,
-        template.as_deref(),
-        &policy,
-        &state.db,
-    )
-    .await;
+    let result =
+        crate::publish_with_retry(publisher, &post, template.as_deref(), &policy, &state.db).await;
 
     match result {
         Ok(msg) => {

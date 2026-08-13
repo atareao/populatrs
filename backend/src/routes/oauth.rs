@@ -259,6 +259,7 @@ pub async fn callback(
             refresh_token,
             redirect_uri: Some(x_pub.redirect_uri.clone()),
             template: x_pub.template.clone(),
+            reply_template: Some(x_pub.reply_template.clone()),
         };
 
         if let Err(e) = state.db.upsert_publisher(&id, &updated, true).await {
@@ -807,6 +808,7 @@ pub async fn callback_get(
                 refresh_token,
                 redirect_uri: Some(x_pub.redirect_uri.clone()),
                 template: x_pub.template.clone(),
+                reply_template: Some(x_pub.reply_template.clone()),
             };
 
             if let Err(e) = state

@@ -69,6 +69,7 @@ pub fn create_publisher_with_config_path(
             refresh_token,
             redirect_uri,
             template,
+            reply_template,
         } => Ok(Box::new(XPublisher::new(
             id,
             client_id.clone(),
@@ -77,6 +78,7 @@ pub fn create_publisher_with_config_path(
             refresh_token.clone(),
             redirect_uri.clone(),
             template.clone(),
+            reply_template.clone(),
             config_path,
             db,
         ))),
@@ -187,7 +189,7 @@ pub fn create_publisher_with_config_path(
 pub fn get_default_template(publisher_type: &str) -> String {
     match publisher_type {
         "telegram" => "📰 *{{ title }}*\n\n{{ description }}\n\n🔗 {{ url }}".to_string(),
-        "x" => "{{ title }}\n\n{{ url }}".to_string(),
+        "x" => "{{ title }}".to_string(),
         "mastodon" => "{{ title }}\n\n{{ url }}\n\n{{ description }}".to_string(),
         "linkedin" => "{{ title }}\n\n{{ description }}\n\n🔗 {{ url }}".to_string(),
         "bluesky" => "{{ title }}\n\n{{ url }}".to_string(),

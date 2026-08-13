@@ -129,6 +129,7 @@ pub enum PublisherConfig {
         refresh_token: Option<String>,
         redirect_uri: Option<String>,
         template: String,
+        reply_template: Option<String>,
     },
     Mastodon {
         server_url: String,
@@ -473,6 +474,7 @@ mod tests {
                 refresh_token: None,
                 redirect_uri: None,
                 template: String::new(),
+                reply_template: None,
             }
             .type_name(),
             "x"

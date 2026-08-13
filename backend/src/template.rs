@@ -58,7 +58,7 @@ impl TemplateRenderer {
     pub fn get_default_template(publisher_type: &str) -> String {
         match publisher_type {
             "telegram" => "**{{ title }}**\n\n{{ description | truncate(480) }}\n\n🔗 [Leer más]({{ url }})".to_string(),
-            "x" => "{{ title | truncate(240) }}\n\n{{ url }}".to_string(),
+            "x" => "{{ title | truncate(240) }}".to_string(),
             "mastodon" => "{{ title }}\n\n{{ description | truncate(400) }}\n\n{{ url }}".to_string(),
             "linkedin" => "{{ title }}\n\n{{ description | truncate(700) }}\n\nLeer más: {{ url }}".to_string(),
             "matrix" => "<h3>{{ title }}</h3><p>{{ description | truncate(500) }}</p><p><a href=\"{{ url }}\">Leer más</a></p>".to_string(),
