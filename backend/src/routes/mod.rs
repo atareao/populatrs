@@ -76,6 +76,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
             routing::post(oauth::callback),
         )
         .route(
+            "/api/publishers/{id}/oauth/status",
+            routing::get(oauth::status),
+        )
+        .route(
             "/api/schedule",
             routing::get(schedule::get).put(schedule::update),
         )

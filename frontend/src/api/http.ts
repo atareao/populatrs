@@ -149,6 +149,14 @@ export async function resolveYoutubeUrl(url: string): Promise<{ channel_id: stri
 }
 
 // OAuth
+export interface OAuthStatus {
+  ok: boolean;
+  connected: boolean;
+  token_expires_at: number | null;
+  has_refresh_token: boolean;
+  publisher_type: string;
+}
+
 export async function getOAuthUrl(id: string): Promise<{ url: string }> {
   return fetcher(`/api/publishers/${id}/oauth/authorize`);
 }
@@ -158,6 +166,10 @@ export async function oauthCallback(id: string, code: string, state: string): Pr
     method: "POST",
     body: { code, state },
   });
+}
+
+export async function fetchOAuthStatus(id: string): Promise<OAuthStatus> {
+  return fetcher<OAuthStatus>(`/api/publishers/${id}/oauth/status`);
 }
 
 // Logs
