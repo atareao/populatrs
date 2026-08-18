@@ -116,7 +116,7 @@ async fn main() {
 
     // ───── Publisher Manager (shared) ─────
     let publishers = db.list_publishers().await.unwrap_or_default();
-    let mut publisher_manager = PublisherManager::new();
+    let mut publisher_manager = PublisherManager::new_with_db(None, Some(Arc::new(db.clone())));
     for (id, (pub_config, enabled)) in &publishers {
         if !enabled {
             continue;
