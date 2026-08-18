@@ -1,4 +1,10 @@
 # Changelog
+## [0.4.9] - 2026-08-18
+
+### Bug Fixes
+
+- Persist refreshed X tokens to database by passing DB reference to PublisherManager
+- Persist refreshed X tokens to database
 ## [0.4.8] - 2026-08-13
 
 ### Documentation
@@ -10,6 +16,10 @@
 - Add retry policy with exponential backoff for publishing (#31)
 - Two-step X publishing with reply thread
 - Two-step X publishing with reply thread
+
+### Miscellaneous Tasks
+
+- Release v0.4.8
 ## [0.4.7] - 2026-08-09
 
 ### Bug Fixes
