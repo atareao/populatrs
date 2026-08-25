@@ -5,6 +5,10 @@
 
 - Persist refreshed X tokens to database by passing DB reference to PublisherManager
 - Persist refreshed X tokens to database
+
+### Miscellaneous Tasks
+
+- Release v0.4.9
 ## [0.4.8] - 2026-08-13
 
 ### Documentation
