@@ -43,6 +43,11 @@ describe("Settings", () => {
         ok: true, status: 200,
         json: () => Promise.resolve(mockSchedule),
         text: () => Promise.resolve(JSON.stringify(mockSchedule)),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ max_retries: 3, base_delay_seconds: 5, max_delay_seconds: 300, backoff_multiplier: 2.0 }),
+        text: () => Promise.resolve(JSON.stringify({ max_retries: 3, base_delay_seconds: 5, max_delay_seconds: 300, backoff_multiplier: 2.0 })),
       });
   });
 

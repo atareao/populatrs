@@ -5,7 +5,7 @@ import {
 import { PlusOutlined } from "@ant-design/icons";
 import {
   fetchPublishers, createPublisher, updatePublisher, testPublisher, deletePublisher, getOAuthUrl,
-  type PublisherConfigEntry,
+  fetchOAuthStatus, type PublisherConfigEntry, type OAuthStatus,
 } from "../../api/http";
 
 const { Title } = Typography;
@@ -81,12 +81,31 @@ export default function PublisherList() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResultVisible, setTestResultVisible] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [oauthStatuses, setOauthStatuses] = useState<Record<string, OAuthStatus>>({});
   const [form] = Form.useForm();
 
   const loadData = async () => {
     try {
       const data = await fetchPublishers();
       setPublishers(data.publishers);
+      // Fetch OAuth status for connected OAuth publishers
+      const oauthTypes = ["X", "LinkedIn", "Threads", "Mastodon"];
+      const statusPromises = Object.entries(data.publishers)
+        .filter(([_, entry]) => oauthTypes.includes(entry.type) && entry.config.access_token)
+        .map(async ([id]) => {
+          try {
+            const status = await fetchOAuthStatus(id);
+            return [id, status] as const;
+          } catch {
+            return null;
+          }
+        });
+      const results = await Promise.all(statusPromises);
+      const statusMap: Record<string, OAuthStatus> = {};
+      for (const r of results) {
+        if (r) statusMap[r[0]] = r[1];
+      }
+      setOauthStatuses(statusMap);
     } catch (e) {
       message.error("Failed to load publishers");
     } finally {
@@ -252,14 +271,37 @@ export default function PublisherList() {
         const cfg = record.config.config;
         const isOAuthType = type === "X" || type === "LinkedIn" || type === "Threads" || type === "Mastodon";
         const connected = !!(cfg.access_token);
+        const oauthStatus = oauthStatuses[record.id];
 
         const configured = isPublisherConfigured(cfg, type);
+
+        // Format token expiry for display
+        const tokenExpiryText = (() => {
+          if (!oauthStatus?.token_expires_at) return null;
+          const expiresAt = oauthStatus.token_expires_at * 1000; // Convert to ms
+          const now = Date.now();
+          const diffMs = expiresAt - now;
+          if (diffMs <= 0) return <Tag color="red">Token expired</Tag>;
+          const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          if (days > 0) return <Tag color="orange">Expires in {days}d {hours}h</Tag>;
+          return <Tag color="orange">Expires in {hours}h</Tag>;
+        })();
 
         return (
           <Space>
             {isOAuthType && (
               connected
-                ? <Tag color="green">Connected</Tag>
+                ? (
+                  <>
+                    <Tag color="green">Connected</Tag>
+                    {tokenExpiryText}
+                    {oauthStatus?.has_refresh_token && <Tag color="blue">Has refresh</Tag>}
+                    <Button size="small" onClick={() => handleOAuth(record.id, type)}>
+                      Reconnect
+                    </Button>
+                  </>
+                )
                 : (
                   <Button size="small" type="primary" onClick={() => handleOAuth(record.id, type)}>
                     Connect

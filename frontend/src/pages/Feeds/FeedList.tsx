@@ -3,7 +3,7 @@ import {
   Table, Button, Modal, Form, Input, Select, Switch, Typography, Space, Tag, Tabs, Row, Col, message, Popconfirm,
 } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, LoadingOutlined } from "@ant-design/icons";
-import { fetchFeeds, createFeed, updateFeed, deleteFeed, runFeed, fetchPublishers, resolveYoutubeUrl, type FeedConfig, type FeedPublisherBinding } from "../../api/http";
+import { fetchFeeds, createFeed, updateFeed, deleteFeed, runFeed, dryRunFeed, fetchPublishers, resolveYoutubeUrl, type FeedConfig, type FeedPublisherBinding } from "../../api/http";
 
 const { Title, Text } = Typography;
 
@@ -29,6 +29,7 @@ export default function FeedList() {
   const [pendingRun, setPendingRun] = useState<{ id: string; name: string } | null>(null);
   const [publishWithRun, setPublishWithRun] = useState(true);
   const [running, setRunning] = useState(false);
+  const [dryRunning, setDryRunning] = useState(false);
   const [form] = Form.useForm();
 
   const loadData = async () => {
@@ -89,6 +90,34 @@ export default function FeedList() {
     setRunResultVisible(true);
   };
 
+  const handleDryRun = async () => {
+    if (!pendingRun) return;
+    const { id, name } = pendingRun;
+    setDryRunning(true);
+    setRunningFeeds((prev) => new Set(prev).add(id));
+    try {
+      const result = await dryRunFeed(id);
+      setRunResult({
+        success: true,
+        feedId: id,
+        feedName: name,
+        postsCount: result.posts_count,
+        posts: result.posts ?? [],
+        message: result.message,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setRunResult({ success: false, feedId: id, feedName: name, postsCount: 0, posts: [], message: `Dry run failed: ${msg}` });
+    } finally {
+      setDryRunning(false);
+      setRunningFeeds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
   const handleRunConfirmed = async () => {
     if (!pendingRun) return;
     const { id, name } = pendingRun;
@@ -129,6 +158,7 @@ export default function FeedList() {
     setRunResult(null);
     setPendingRun(null);
     setRunning(false);
+    setDryRunning(false);
   };
 
   const handleSubmit = async () => {
@@ -284,9 +314,17 @@ export default function FeedList() {
         open={runResultVisible}
         onCancel={resetRunModal}
         footer={runResult
-          ? <Button onClick={resetRunModal}>Close</Button>
+          ? <Space>
+              <Button onClick={resetRunModal}>Close</Button>
+              {runResult.postsCount > 0 && runResult.posts && (
+                <Button onClick={() => setRunResult(null)}>Back</Button>
+              )}
+            </Space>
           : <Space>
               <Button onClick={resetRunModal}>Cancel</Button>
+              <Button onClick={handleDryRun} loading={dryRunning}>
+                {dryRunning ? "Dry running..." : "🔍 Dry Run"}
+              </Button>
               <Button type="primary" onClick={handleRunConfirmed} loading={running}>
                 {running ? "Running..." : "Execute"}
               </Button>
@@ -294,7 +332,18 @@ export default function FeedList() {
         }
       >
         {runResult ? (
-          <p>{runResult.message}</p>
+          <>
+            <p>{runResult.message}</p>
+            {runResult.posts && runResult.posts.length > 0 && (
+              <ul style={{ marginTop: 8 }}>
+                {runResult.posts.map((p) => (
+                  <li key={p.guid}>
+                    <a href={p.url} target="_blank" rel="noopener noreferrer">{p.title}</a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : (
           <>
             <p>Run feed <strong>{pendingRun?.name}</strong>?</p>

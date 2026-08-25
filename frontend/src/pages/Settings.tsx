@@ -28,8 +28,11 @@ import {
   updateSchedule,
   fetchRetryPolicy,
   updateRetryPolicy,
+  fetchPublishSettings,
+  updatePublishSettings,
   type ScheduleConfig,
   type RetryPolicy,
+  type PublishSettings,
 } from "../api/http"
 
 const { Title } = Typography
@@ -59,6 +62,9 @@ export default function Settings() {
   const [retryPolicy, setRetryPolicy] = useState<RetryPolicy | null>(null)
   const [retrySaving, setRetrySaving] = useState(false)
   const [retryForm] = Form.useForm()
+  const [publishSettings, setPublishSettings] = useState<PublishSettings | null>(null)
+  const [publishSaving, setPublishSaving] = useState(false)
+  const [publishForm] = Form.useForm()
 
   useEffect(() => {
     Promise.all([
@@ -73,10 +79,14 @@ export default function Settings() {
         retryForm.setFieldsValue(d)
         setRetryPolicy(d)
       }),
+      fetchPublishSettings().then((d) => {
+        publishForm.setFieldsValue(d)
+        setPublishSettings(d)
+      }),
     ])
       .catch(() => message.error("Failed to load config"))
       .finally(() => setLoading(false))
-  }, [ytForm, schedForm, retryForm])
+  }, [ytForm, schedForm, retryForm, publishForm])
 
   const handleYtSubmit = async (values: { api_key: string }) => {
     setYtSaving(true)
@@ -115,6 +125,19 @@ export default function Settings() {
       message.error("Failed to save retry policy")
     } finally {
       setRetrySaving(false)
+    }
+  }
+
+  const handlePublishSubmit = async (values: PublishSettings) => {
+    setPublishSaving(true)
+    try {
+      await updatePublishSettings(values)
+      setPublishSettings(values)
+      message.success("Publish settings saved")
+    } catch {
+      message.error("Failed to save publish settings")
+    } finally {
+      setPublishSaving(false)
     }
   }
 
@@ -307,6 +330,53 @@ export default function Settings() {
             icon={<SaveOutlined />}
           >
             Save Retry Policy
+          </Button>
+        </Form>
+      </Card>
+
+      <Card
+        title={
+          <>
+            <InfoCircleOutlined /> Publish Settings
+          </>
+        }
+        style={{ maxWidth: 600, marginTop: 16 }}
+      >
+        <Alert
+          message="Control how many posts are published per cycle and filter by age."
+          type="info"
+          showIcon
+          icon={<InfoCircleOutlined />}
+          style={{ marginBottom: 20 }}
+        />
+        <Form
+          form={publishForm}
+          layout="vertical"
+          onFinish={handlePublishSubmit}
+          initialValues={{ max_posts: 1, min_date: "" }}
+        >
+          <Form.Item
+            name="max_posts"
+            label="Max Posts Per Cycle"
+            rules={[{ required: true, message: "Required" }]}
+            help="Maximum number of posts to publish each cycle. Set to 0 to publish all pending posts."
+          >
+            <InputNumber min={0} max={100} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            name="min_date"
+            label="Minimum Date"
+            help="Skip posts older than this date. Format: YYYY-MM-DD or RFC3339 (e.g. 2024-01-15T10:00:00Z). Leave empty for no filter."
+          >
+            <Input placeholder="2024-01-01" />
+          </Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={publishSaving}
+            icon={<SaveOutlined />}
+          >
+            Save Publish Settings
           </Button>
         </Form>
       </Card>

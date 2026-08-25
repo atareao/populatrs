@@ -5,6 +5,7 @@ pub mod oauth;
 pub mod publishers;
 pub mod retry;
 pub mod schedule;
+pub mod settings;
 pub mod status;
 pub mod storage;
 pub mod youtube;
@@ -76,6 +77,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
             routing::post(oauth::callback),
         )
         .route(
+            "/api/publishers/{id}/oauth/status",
+            routing::get(oauth::status),
+        )
+        .route(
             "/api/schedule",
             routing::get(schedule::get).put(schedule::update),
         )
@@ -98,6 +103,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route(
             "/api/settings/retry-policy",
             routing::get(retry::get_retry_policy).put(retry::update_retry_policy),
+        )
+        .route(
+            "/api/settings/publish",
+            routing::get(settings::get_publish_settings).put(settings::update_publish_settings),
         )
         .layer(middleware::from_fn(require_auth));
 

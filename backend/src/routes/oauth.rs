@@ -490,6 +490,96 @@ pub async fn callback(
         .into_response()
 }
 
+/// `GET /api/publishers/{id}/oauth/status`
+///
+/// Returns the OAuth connection status for a publisher:
+/// - connected: whether an access_token exists
+/// - token_expires_at: when the token expires (Threads)
+/// - has_refresh_token: whether a refresh_token is available (X, LinkedIn)
+/// - publisher_type: the type name
+pub async fn status(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let config = match state.db.get_publisher(&id).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "ok": false, "error": "Publisher not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "ok": false, "error": format!("Database error: {e}") })),
+            )
+                .into_response();
+        }
+    };
+
+    let (connected, token_expires_at, has_refresh_token, publisher_type) = match &config {
+        PublisherConfig::X {
+            access_token,
+            refresh_token,
+            ..
+        } => (
+            access_token.is_some(),
+            None,
+            refresh_token.is_some(),
+            "x",
+        ),
+        PublisherConfig::LinkedIn {
+            access_token,
+            refresh_token,
+            ..
+        } => (
+            access_token.is_some(),
+            None,
+            refresh_token.is_some(),
+            "linkedin",
+        ),
+        PublisherConfig::Threads {
+            access_token,
+            token_expires_at,
+            ..
+        } => (
+            access_token.is_some(),
+            *token_expires_at,
+            false,
+            "threads",
+        ),
+        PublisherConfig::Mastodon {
+            access_token, ..
+        } => (
+            access_token.is_some(),
+            None,
+            false,
+            "mastodon",
+        ),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "ok": false,
+                    "error": "Publisher type does not support OAuth"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    Json(json!({
+        "ok": true,
+        "connected": connected,
+        "token_expires_at": token_expires_at,
+        "has_refresh_token": has_refresh_token,
+        "publisher_type": publisher_type,
+    }))
+    .into_response()
+}
+
 /// Helper: find publisher_id from the stored OAuth state value.
 /// Iterates the oauth_states map looking for a matching state value.
 fn resolve_publisher_id(

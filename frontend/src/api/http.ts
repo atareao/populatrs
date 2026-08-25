@@ -140,8 +140,13 @@ export async function updateStorage(storage: StorageConfig): Promise<void> {
 // Run feed manually
 // publish=true: fetch + publish to publishers + mark as published
 // publish=false: fetch + mark as published only (no publisher results)
+// dry_run=true: fetch + preview only, no side effects
 export async function runFeed(id: string, publish = false): Promise<{ posts_count: number; posts: { guid: string; title: string; url: string }[] }> {
   return fetcher(`/api/feeds/${id}/run?publish=${publish}`, { method: "POST" });
+}
+
+export async function dryRunFeed(id: string): Promise<{ posts_count: number; posts: { guid: string; title: string; url: string }[]; dry_run: boolean; message: string }> {
+  return fetcher(`/api/feeds/${id}/run?dry_run=true`, { method: "POST" });
 }
 
 export async function resolveYoutubeUrl(url: string): Promise<{ channel_id: string }> {
@@ -149,6 +154,14 @@ export async function resolveYoutubeUrl(url: string): Promise<{ channel_id: stri
 }
 
 // OAuth
+export interface OAuthStatus {
+  ok: boolean;
+  connected: boolean;
+  token_expires_at: number | null;
+  has_refresh_token: boolean;
+  publisher_type: string;
+}
+
 export async function getOAuthUrl(id: string): Promise<{ url: string }> {
   return fetcher(`/api/publishers/${id}/oauth/authorize`);
 }
@@ -158,6 +171,10 @@ export async function oauthCallback(id: string, code: string, state: string): Pr
     method: "POST",
     body: { code, state },
   });
+}
+
+export async function fetchOAuthStatus(id: string): Promise<OAuthStatus> {
+  return fetcher<OAuthStatus>(`/api/publishers/${id}/oauth/status`);
 }
 
 // Logs
@@ -234,4 +251,18 @@ export async function fetchRetryPolicy(): Promise<RetryPolicy> {
 
 export async function updateRetryPolicy(policy: RetryPolicy): Promise<void> {
   return fetcher("/api/settings/retry-policy", { method: "PUT", body: policy });
+}
+
+// Publish settings (MAX_POSTS, MIN_DATE)
+export interface PublishSettings {
+  max_posts: number;
+  min_date: string;
+}
+
+export async function fetchPublishSettings(): Promise<PublishSettings> {
+  return fetcher<PublishSettings>("/api/settings/publish");
+}
+
+export async function updatePublishSettings(settings: PublishSettings): Promise<void> {
+  return fetcher("/api/settings/publish", { method: "PUT", body: settings });
 }
