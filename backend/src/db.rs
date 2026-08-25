@@ -754,6 +754,74 @@ impl Database {
         self.set_setting("retry_policy", &json_str).await
     }
 
+    // ───── Publish Settings (MAX_POSTS, MIN_DATE) ─────
+
+    /// Get the maximum number of posts to publish per cycle.
+    /// 0 means publish all pending posts.
+    pub async fn get_max_posts(&self) -> Result<u64> {
+        Ok(self
+            .get_setting("max_posts")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(1))
+    }
+
+    /// Set the maximum number of posts to publish per cycle.
+    pub async fn set_max_posts(&self, max: u64) -> Result<()> {
+        self.set_setting("max_posts", &max.to_string()).await
+    }
+
+    /// Get the minimum date threshold for publishing.
+    /// Posts with published_date older than this will be skipped.
+    /// Returns None if not configured.
+    pub async fn get_min_date(&self) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+        match self.get_setting("min_date").await? {
+            Some(date_str) => {
+                match date_str.parse::<chrono::DateTime<chrono::Utc>>() {
+                    Ok(dt) => Ok(Some(dt)),
+                    Err(_) => {
+                        // Try RFC3339 or ISO 8601
+                        chrono::DateTime::parse_from_rfc3339(&date_str)
+                            .map(|dt| Some(dt.with_timezone(&chrono::Utc)))
+                            .or_else(|_| {
+                                // Try YYYY-MM-DD format
+                                chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                                    .map(|d| {
+                                        Some(d.and_hms_opt(0, 0, 0).unwrap().and_utc())
+                                    })
+                                    .map_err(|e| anyhow::anyhow!("Failed to parse min_date '{}': {}", date_str, e))
+                            })
+                    }
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Set the minimum date threshold for publishing.
+    /// Accepts RFC3339 format or YYYY-MM-DD.
+    pub async fn set_min_date(&self, date_str: &str) -> Result<()> {
+        // Validate the date string before storing
+        if !date_str.is_empty() {
+            // Try parsing to validate
+            let _ = date_str.parse::<chrono::DateTime<chrono::Utc>>()
+                .or_else(|_| chrono::DateTime::parse_from_rfc3339(date_str).map(|dt| dt.with_timezone(&chrono::Utc)))
+                .or_else(|_| {
+                    chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                        .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc())
+                })
+                .map_err(|e| anyhow::anyhow!("Invalid date format '{}': {}. Use RFC3339 (2024-01-15T10:00:00Z) or YYYY-MM-DD", date_str, e))?;
+        }
+        self.set_setting("min_date", date_str).await
+    }
+
+    /// Clear the minimum date threshold.
+    pub async fn clear_min_date(&self) -> Result<()> {
+        self.set_setting("min_date", "").await
+    }
+
     // ───── Feed Cache ─────
 
     /// Get cached ETag for a feed.

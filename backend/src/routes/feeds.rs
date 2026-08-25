@@ -19,6 +19,7 @@ use crate::models::FeedConfig;
 #[derive(Debug, Deserialize, Default)]
 pub struct RunQuery {
     publish: Option<bool>,
+    dry_run: Option<bool>,
 }
 
 /// List all feeds.
@@ -178,6 +179,7 @@ pub async fn toggle(
 /// Run a feed manually: fetch posts, optionally publish.
 /// `?publish=true` — fetch + publish to publishers + mark as published
 /// `?publish=false` (default) — only mark as published, no publish
+/// `?dry_run=true` — fetch + preview only, no marking or publishing
 #[instrument(skip(state))]
 pub async fn run(
     State(state): State<Arc<AppState>>,
@@ -185,6 +187,7 @@ pub async fn run(
     Query(query): Query<RunQuery>,
 ) -> impl IntoResponse {
     let do_publish = query.publish.unwrap_or(false);
+    let is_dry_run = query.dry_run.unwrap_or(false);
     let feed_config = match state.db.get_feed(&id).await {
         Ok(Some(f)) => f,
         Ok(None) => {
@@ -228,7 +231,22 @@ pub async fn run(
                 }
             }
 
-            if do_publish {
+            // Apply MIN_DATE filter from global settings
+            let min_date = state.db.get_min_date().await.unwrap_or(None);
+            if let Some(ref min_dt) = min_date {
+                new_posts.retain(|p| p.published_date >= *min_dt);
+            }
+
+            // Apply MAX_POSTS limit from global settings
+            let max_posts = state.db.get_max_posts().await.unwrap_or(1);
+            if max_posts > 0 && new_posts.len() > max_posts as usize {
+                new_posts.truncate(max_posts as usize);
+            }
+
+            if is_dry_run {
+                // Dry run: just return what would be published, no side effects
+                tracing::info!(count = new_posts.len(), feed_id = %id, "Dry run completed");
+            } else if do_publish {
                 // Full pipeline: publish to publishers + mark + record results
                 let pub_ids: Vec<String> = feed_config
                     .publishers
@@ -286,7 +304,7 @@ pub async fn run(
                 }
 
                 tracing::info!(count = new_posts.len(), feed_id = %id, "Manual feed run with publish");
-            } else {
+            } else if !is_dry_run {
                 // Just mark as published (no publishers recorded)
                 for post in &new_posts {
                     state
@@ -317,16 +335,19 @@ pub async fn run(
                 })
                 .collect();
 
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "status": "ok",
-                    "feed_id": id,
-                    "posts_count": new_posts.len(),
-                    "posts": posts_json,
-                })),
-            )
-                .into_response()
+            let mut response = json!({
+                "status": "ok",
+                "feed_id": id,
+                "posts_count": new_posts.len(),
+                "posts": posts_json,
+            });
+
+            if is_dry_run {
+                response["dry_run"] = json!(true);
+                response["message"] = json!(format!("Dry run: {} post(s) would be published", new_posts.len()));
+            }
+
+            (StatusCode::OK, Json(response)).into_response()
         }
         Err(e) => {
             tracing::error!(feed_id = %id, error = %e, "Manual feed run failed");

@@ -101,6 +101,19 @@ pub async fn run_feed_check(
 ) -> Result<()> {
     tracing::info!("Starting feed check cycle");
 
+    // Read publish settings
+    let max_posts = db.get_max_posts().await.unwrap_or(1);
+    let min_date = db.get_min_date().await.unwrap_or(None);
+
+    if let Some(ref md) = min_date {
+        tracing::info!("MIN_DATE filter active: skipping posts older than {}", md);
+    }
+    if max_posts > 0 {
+        tracing::info!("MAX_POSTS limit active: max {} posts per cycle", max_posts);
+    } else {
+        tracing::info!("MAX_POSTS=0: publishing all pending posts");
+    }
+
     let feed_results = {
         let mut manager = feed_manager.lock().await;
         manager.check_all_feeds().await
@@ -150,6 +163,8 @@ pub async fn run_feed_check(
                     continue;
                 }
 
+                let mut posts_published_this_cycle = 0u64;
+
                 for post in new_posts {
                     // Check if already published (via DB)
                     let already_published = db
@@ -160,6 +175,29 @@ pub async fn run_feed_check(
                     if already_published {
                         tracing::debug!("Post already published: {}", post.title);
                         continue;
+                    }
+
+                    // Apply MIN_DATE filter: skip posts older than the threshold
+                    if let Some(ref min_dt) = min_date {
+                        if post.published_date < *min_dt {
+                            tracing::debug!(
+                                "Skipping post '{}' — published_date {} is before MIN_DATE {}",
+                                post.title,
+                                post.published_date,
+                                min_dt
+                            );
+                            continue;
+                        }
+                    }
+
+                    // Apply MAX_POSTS limit
+                    if max_posts > 0 && posts_published_this_cycle >= max_posts {
+                        tracing::debug!(
+                            "MAX_POSTS limit ({}) reached, stopping for feed: {}",
+                            max_posts,
+                            feed_id
+                        );
+                        break;
                     }
 
                     tracing::info!("Publishing new post: {}", post.title);
@@ -212,6 +250,7 @@ pub async fn run_feed_check(
 
                     if successful_publishes > 0 {
                         total_published += 1;
+                        posts_published_this_cycle += 1;
                         tracing::info!(
                             "Successfully published \"{}\" to {}/{} publishers",
                             post.title,
