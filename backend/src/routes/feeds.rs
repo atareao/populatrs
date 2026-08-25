@@ -238,9 +238,11 @@ pub async fn run(
             }
 
             // Apply MAX_POSTS limit from global settings
+            // Take the newest N posts (last N in oldest-first sorted vec)
             let max_posts = state.db.get_max_posts().await.unwrap_or(1);
             if max_posts > 0 && new_posts.len() > max_posts as usize {
-                new_posts.truncate(max_posts as usize);
+                let split_at = new_posts.len() - max_posts as usize;
+                new_posts = new_posts.split_off(split_at);
             }
 
             if is_dry_run {

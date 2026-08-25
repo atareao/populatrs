@@ -163,8 +163,9 @@ pub async fn run_feed_check(
                     continue;
                 }
 
-                let mut posts_published_this_cycle = 0u64;
-
+                // First pass: collect publishable posts (not already published, passes MIN_DATE)
+                // new_posts is sorted oldest-first from fetch_posts
+                let mut publishable_posts: Vec<Post> = Vec::new();
                 for post in new_posts {
                     // Check if already published (via DB)
                     let already_published = db
@@ -190,16 +191,21 @@ pub async fn run_feed_check(
                         }
                     }
 
-                    // Apply MAX_POSTS limit
-                    if max_posts > 0 && posts_published_this_cycle >= max_posts {
-                        tracing::debug!(
-                            "MAX_POSTS limit ({}) reached, stopping for feed: {}",
-                            max_posts,
-                            feed_id
-                        );
-                        break;
-                    }
+                    publishable_posts.push(post);
+                }
 
+                // Apply MAX_POSTS: take the newest N posts (last N in oldest-first sorted vec)
+                // then publish in chronological order (oldest first within the selected N)
+                if max_posts > 0 && publishable_posts.len() > max_posts as usize {
+                    let split_at = publishable_posts.len() - max_posts as usize;
+                    publishable_posts = publishable_posts.split_off(split_at);
+                    tracing::debug!(
+                        "MAX_POSTS limit ({}) active: publishing only the {} newest posts for feed: {}",
+                        max_posts, max_posts, feed_id
+                    );
+                }
+
+                for post in &publishable_posts {
                     tracing::info!("Publishing new post: {}", post.title);
 
                     if dry_run {
@@ -236,7 +242,7 @@ pub async fn run_feed_check(
                             }
                         };
 
-                        match publish_with_retry(publisher, &post, feed_template, &policy, db).await
+                        match publish_with_retry(publisher, post, feed_template, &policy, db).await
                         {
                             Ok(message) => {
                                 tracing::info!("✓ Published to {}: {}", pub_id, message);
@@ -250,7 +256,6 @@ pub async fn run_feed_check(
 
                     if successful_publishes > 0 {
                         total_published += 1;
-                        posts_published_this_cycle += 1;
                         tracing::info!(
                             "Successfully published \"{}\" to {}/{} publishers",
                             post.title,
