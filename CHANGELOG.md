@@ -1,4 +1,14 @@
 # Changelog
+## [0.4.11] - 2026-08-25
+
+### Bug Fixes
+
+- MAX_POSTS selects newest posts
+## [0.4.10] - 2026-08-25
+
+### Miscellaneous Tasks
+
+- Release v0.4.10
 ## [0.4.9] - 2026-08-18
 
 ### Bug Fixes
