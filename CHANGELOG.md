@@ -1,10 +1,24 @@
 # Changelog
+## [0.4.12] - 2026-08-26
+
+### Features
+
+- Implement OIDC refresh token support (#41)
 ## [0.4.11] - 2026-08-25
 
 ### Bug Fixes
 
+- MAX_POSTS selects newest posts, published in chronological order
 - MAX_POSTS selects newest posts
+
+### Miscellaneous Tasks
+
+- Release v0.4.11
 ## [0.4.10] - 2026-08-25
+
+### Features
+
+- Publish settings (MAX_POSTS, MIN_DATE) and dry-run mode
 
 ### Miscellaneous Tasks
 
@@ -14,7 +28,12 @@
 ### Bug Fixes
 
 - Persist refreshed X tokens to database by passing DB reference to PublisherManager
+- Persist refreshed X tokens to database by passing DB reference to PublisherManager
 - Persist refreshed X tokens to database
+
+### Features
+
+- Reconnect OAuth publishers with status endpoint and UI
 
 ### Miscellaneous Tasks
 
