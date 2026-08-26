@@ -7,6 +7,8 @@ import Settings from "../pages/Settings";
 
 const mockYoutube = { api_key: "AIzaSyTest123" };
 const mockSchedule = { cron_expression: "0 */2 * * *", timezone: "Europe/Madrid", next_run_at: "2026-07-26T12:00:00+00:00" };
+const mockRetry = { max_retries: 3, base_delay_seconds: 5, max_delay_seconds: 300, backoff_multiplier: 2.0 };
+const mockPublish = { max_posts: 1, min_date: "" };
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({
@@ -27,12 +29,18 @@ function renderSettings(initialEntries = ["/settings"]) {
   );
 }
 
+/** Helper: click a tab by its label text to activate its content */
+async function clickTab(label: string) {
+  const tab = screen.getByRole("tab", { name: new RegExp(label, "i") });
+  await userEvent.click(tab);
+}
+
 describe("Settings", () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.restoreAllMocks();
     sessionStorage.setItem("populatrs_token", "test-token");
-    // mock both endpoints by default
+    // mock all 4 endpoints
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true, status: 200,
@@ -46,8 +54,13 @@ describe("Settings", () => {
       })
       .mockResolvedValueOnce({
         ok: true, status: 200,
-        json: () => Promise.resolve({ max_retries: 3, base_delay_seconds: 5, max_delay_seconds: 300, backoff_multiplier: 2.0 }),
-        text: () => Promise.resolve(JSON.stringify({ max_retries: 3, base_delay_seconds: 5, max_delay_seconds: 300, backoff_multiplier: 2.0 })),
+        json: () => Promise.resolve(mockRetry),
+        text: () => Promise.resolve(JSON.stringify(mockRetry)),
+      })
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        json: () => Promise.resolve(mockPublish),
+        text: () => Promise.resolve(JSON.stringify(mockPublish)),
       });
   });
 
@@ -65,7 +78,7 @@ describe("Settings", () => {
     });
   });
 
-  it("loads and displays schedule section", async () => {
+  it("loads and displays schedule section as default tab", async () => {
     renderSettings();
 
     await waitFor(() => {
@@ -74,11 +87,18 @@ describe("Settings", () => {
     expect(screen.getByDisplayValue(/Europe\/Madrid/)).toBeInTheDocument();
   });
 
-  it("loads and displays youtube config section", async () => {
+  it("loads and displays youtube config section when tab is clicked", async () => {
     renderSettings();
 
     await waitFor(() => {
       expect(screen.getByText("YouTube API Key")).toBeInTheDocument();
+    });
+
+    // YouTube tab label exists, but content is hidden until clicked
+    await clickTab("YouTube API Key");
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("AIzaSyTest123")).toBeInTheDocument();
     });
   });
 
@@ -89,7 +109,13 @@ describe("Settings", () => {
       expect(screen.getByText("YouTube API Key")).toBeInTheDocument();
     });
 
-    const saveBtn = screen.getByRole("button", { name: /save$/i });
+    await clickTab("YouTube API Key");
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("AIzaSyTest123")).toBeInTheDocument();
+    });
+
+    const saveBtn = screen.getByRole("button", { name: /save/i });
     await userEvent.click(saveBtn);
 
     await waitFor(() => {
@@ -118,8 +144,14 @@ describe("Settings", () => {
     });
   });
 
-  it("shows info about youtube api key", async () => {
+  it("shows info about youtube api key when tab is active", async () => {
     renderSettings();
+
+    await waitFor(() => {
+      expect(screen.getByText("YouTube API Key")).toBeInTheDocument();
+    });
+
+    await clickTab("YouTube API Key");
 
     await waitFor(() => {
       expect(

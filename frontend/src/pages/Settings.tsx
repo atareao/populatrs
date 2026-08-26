@@ -11,6 +11,8 @@ import {
   Spin,
   Alert,
   Tag,
+  Tabs,
+  type TabsProps,
 } from "antd"
 import {
   SaveOutlined,
@@ -52,6 +54,7 @@ export const CRON_PRESETS = [
 
 export default function Settings() {
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState("schedule")
   const [ytSaving, setYtSaving] = useState(false)
   const [schedSaving, setSchedSaving] = useState(false)
   const [currentCron, setCurrentCron] = useState<string>("0 * * * *")
@@ -148,237 +151,257 @@ export default function Settings() {
       </div>
     )
 
+  const tabItems: TabsProps["items"] = [
+    {
+      key: "schedule",
+      label: (
+        <span>
+          <ClockCircleOutlined /> Schedule
+        </span>
+      ),
+      children: (
+        <>
+          <Tag icon={<GlobalOutlined />} style={{ marginBottom: 12 }}>
+            {currentTimezone} · {currentCron}
+          </Tag>
+          {nextRunAt && (
+            <Tag color="blue" style={{ marginBottom: 12 }}>
+              Next run: {new Date(nextRunAt).toLocaleString()}
+            </Tag>
+          )}
+          <Form
+            form={schedForm}
+            layout="vertical"
+            onFinish={handleSchedSubmit}
+            initialValues={{ cron_expression: "0 * * * *", timezone: "UTC" }}
+          >
+            <Form.Item label="Presets" style={{ marginBottom: 8 }}>
+              <Select
+                allowClear
+                placeholder="Select a preset..."
+                style={{ width: "100%" }}
+                options={CRON_PRESETS}
+                onChange={(value) => {
+                  if (value) schedForm.setFieldsValue({ cron_expression: value })
+                }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="cron_expression"
+              label="Cron Expression"
+              rules={[{ required: true, message: "Enter a cron expression" }]}
+              help={
+                <span>
+                  Five-field cron syntax.{" "}
+                  <a
+                    href="https://crontab.guru/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <LinkOutlined /> crontab.guru
+                  </a>
+                </span>
+              }
+            >
+              <Input placeholder="0 */6 * * *" />
+            </Form.Item>
+            <Form.Item
+              name="timezone"
+              label="Timezone"
+              rules={[{ required: true, message: "Enter a timezone" }]}
+              help="e.g. UTC, Europe/Madrid"
+            >
+              <Input placeholder="UTC" />
+            </Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={schedSaving}
+              icon={<SaveOutlined />}
+            >
+              Save Schedule
+            </Button>
+          </Form>
+        </>
+      ),
+    },
+    {
+      key: "youtube",
+      label: (
+        <span>
+          <YoutubeOutlined /> YouTube API Key
+        </span>
+      ),
+      children: (
+        <>
+          <Alert
+            message="A YouTube Data API v3 key is needed to fetch videos and resolve @handles to channel IDs. Get one at https://console.cloud.google.com/apis/credentials"
+            type="info"
+            showIcon
+            icon={<InfoCircleOutlined />}
+            style={{ marginBottom: 20 }}
+          />
+          <Form
+            form={ytForm}
+            layout="vertical"
+            onFinish={handleYtSubmit}
+            initialValues={{ api_key: "" }}
+          >
+            <Form.Item
+              name="api_key"
+              label="YouTube Data API Key"
+              rules={[
+                {
+                  required: true,
+                  message: "API key is required for YouTube feeds",
+                },
+              ]}
+            >
+              <Input.Password placeholder="AIzaSy..." />
+            </Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={ytSaving}
+              icon={<SaveOutlined />}
+            >
+              Save
+            </Button>
+          </Form>
+        </>
+      ),
+    },
+    {
+      key: "retry",
+      label: (
+        <span>
+          <ReloadOutlined /> Retry Policy
+        </span>
+      ),
+      children: (
+        <>
+          <Alert
+            message="When a publish attempt fails, populatrs will automatically retry with exponential backoff."
+            type="info"
+            showIcon
+            icon={<InfoCircleOutlined />}
+            style={{ marginBottom: 20 }}
+          />
+          <Form
+            form={retryForm}
+            layout="vertical"
+            onFinish={handleRetrySubmit}
+            initialValues={{
+              max_retries: 3,
+              base_delay_seconds: 5,
+              max_delay_seconds: 300,
+              backoff_multiplier: 2.0,
+            }}
+          >
+            <Form.Item
+              name="max_retries"
+              label="Max Retries"
+              rules={[{ required: true, message: "Required" }]}
+            >
+              <InputNumber min={0} max={10} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item
+              name="base_delay_seconds"
+              label="Base Delay (seconds)"
+              rules={[{ required: true, message: "Required" }]}
+            >
+              <InputNumber min={1} max={3600} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item
+              name="max_delay_seconds"
+              label="Max Delay (seconds)"
+              rules={[{ required: true, message: "Required" }]}
+            >
+              <InputNumber min={1} max={86400} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item
+              name="backoff_multiplier"
+              label="Backoff Multiplier"
+              rules={[{ required: true, message: "Required" }]}
+            >
+              <InputNumber min={1} max={10} step={0.1} style={{ width: "100%" }} />
+            </Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={retrySaving}
+              icon={<SaveOutlined />}
+            >
+              Save Retry Policy
+            </Button>
+          </Form>
+        </>
+      ),
+    },
+    {
+      key: "publish",
+      label: (
+        <span>
+          <InfoCircleOutlined /> Publish Settings
+        </span>
+      ),
+      children: (
+        <>
+          <Alert
+            message="Control how many posts are published per cycle and filter by age."
+            type="info"
+            showIcon
+            icon={<InfoCircleOutlined />}
+            style={{ marginBottom: 20 }}
+          />
+          <Form
+            form={publishForm}
+            layout="vertical"
+            onFinish={handlePublishSubmit}
+            initialValues={{ max_posts: 1, min_date: "" }}
+          >
+            <Form.Item
+              name="max_posts"
+              label="Max Posts Per Cycle"
+              rules={[{ required: true, message: "Required" }]}
+              help="Maximum number of posts to publish each cycle. Set to 0 to publish all pending posts."
+            >
+              <InputNumber min={0} max={100} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item
+              name="min_date"
+              label="Minimum Date"
+              help="Skip posts older than this date. Format: YYYY-MM-DD or RFC3339 (e.g. 2024-01-15T10:00:00Z). Leave empty for no filter."
+            >
+              <Input placeholder="2024-01-01" />
+            </Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={publishSaving}
+              icon={<SaveOutlined />}
+            >
+              Save Publish Settings
+            </Button>
+          </Form>
+        </>
+      ),
+    },
+  ]
+
   return (
     <div className="fade-in-up">
       <Title level={3}>
         <YoutubeOutlined /> Settings
       </Title>
 
-      <Card
-        title={
-          <>
-            <ClockCircleOutlined /> Schedule
-          </>
-        }
-        style={{ maxWidth: 600, marginBottom: 16 }}
-      >
-        <Tag icon={<GlobalOutlined />} style={{ marginBottom: 12 }}>
-          {currentTimezone} · {currentCron}
-        </Tag>
-        {nextRunAt && (
-          <Tag color="blue" style={{ marginBottom: 12 }}>
-            Next run: {new Date(nextRunAt).toLocaleString()}
-          </Tag>
-        )}
-        <Form
-          form={schedForm}
-          layout="vertical"
-          onFinish={handleSchedSubmit}
-          initialValues={{ cron_expression: "0 * * * *", timezone: "UTC" }}
-        >
-          <Form.Item label="Presets" style={{ marginBottom: 8 }}>
-            <Select
-              allowClear
-              placeholder="Select a preset..."
-              style={{ width: "100%" }}
-              options={CRON_PRESETS}
-              onChange={(value) => {
-                if (value) schedForm.setFieldsValue({ cron_expression: value })
-              }}
-            />
-          </Form.Item>
-          <Form.Item
-            name="cron_expression"
-            label="Cron Expression"
-            rules={[{ required: true, message: "Enter a cron expression" }]}
-            help={
-              <span>
-                Five-field cron syntax.{" "}
-                <a
-                  href="https://crontab.guru/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <LinkOutlined /> crontab.guru
-                </a>
-              </span>
-            }
-          >
-            <Input placeholder="0 */6 * * *" />
-          </Form.Item>
-          <Form.Item
-            name="timezone"
-            label="Timezone"
-            rules={[{ required: true, message: "Enter a timezone" }]}
-            help="e.g. UTC, Europe/Madrid"
-          >
-            <Input placeholder="UTC" />
-          </Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={schedSaving}
-            icon={<SaveOutlined />}
-          >
-            Save Schedule
-          </Button>
-        </Form>
-      </Card>
-
-      <Card
-        title={
-          <>
-            <YoutubeOutlined /> YouTube API Key
-          </>
-        }
-        style={{ maxWidth: 600 }}
-      >
-        <Alert
-          message="A YouTube Data API v3 key is needed to fetch videos and resolve @handles to channel IDs. Get one at https://console.cloud.google.com/apis/credentials"
-          type="info"
-          showIcon
-          icon={<InfoCircleOutlined />}
-          style={{ marginBottom: 20 }}
+      <Card style={{ maxWidth: 700 }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={tabItems}
+          tabBarStyle={{ marginBottom: 16 }}
         />
-        <Form
-          form={ytForm}
-          layout="vertical"
-          onFinish={handleYtSubmit}
-          initialValues={{ api_key: "" }}
-        >
-          <Form.Item
-            name="api_key"
-            label="YouTube Data API Key"
-            rules={[
-              {
-                required: true,
-                message: "API key is required for YouTube feeds",
-              },
-            ]}
-          >
-            <Input.Password placeholder="AIzaSy..." />
-          </Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={ytSaving}
-            icon={<SaveOutlined />}
-          >
-            Save
-          </Button>
-        </Form>
-      </Card>
-
-      <Card
-        title={
-          <>
-            <ReloadOutlined /> Retry Policy
-          </>
-        }
-        style={{ maxWidth: 600, marginTop: 16 }}
-      >
-        <Alert
-          message="When a publish attempt fails, populatrs will automatically retry with exponential backoff."
-          type="info"
-          showIcon
-          icon={<InfoCircleOutlined />}
-          style={{ marginBottom: 20 }}
-        />
-        <Form
-          form={retryForm}
-          layout="vertical"
-          onFinish={handleRetrySubmit}
-          initialValues={{
-            max_retries: 3,
-            base_delay_seconds: 5,
-            max_delay_seconds: 300,
-            backoff_multiplier: 2.0,
-          }}
-        >
-          <Form.Item
-            name="max_retries"
-            label="Max Retries"
-            rules={[{ required: true, message: "Required" }]}
-          >
-            <InputNumber min={0} max={10} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item
-            name="base_delay_seconds"
-            label="Base Delay (seconds)"
-            rules={[{ required: true, message: "Required" }]}
-          >
-            <InputNumber min={1} max={3600} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item
-            name="max_delay_seconds"
-            label="Max Delay (seconds)"
-            rules={[{ required: true, message: "Required" }]}
-          >
-            <InputNumber min={1} max={86400} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item
-            name="backoff_multiplier"
-            label="Backoff Multiplier"
-            rules={[{ required: true, message: "Required" }]}
-          >
-            <InputNumber min={1} max={10} step={0.1} style={{ width: "100%" }} />
-          </Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={retrySaving}
-            icon={<SaveOutlined />}
-          >
-            Save Retry Policy
-          </Button>
-        </Form>
-      </Card>
-
-      <Card
-        title={
-          <>
-            <InfoCircleOutlined /> Publish Settings
-          </>
-        }
-        style={{ maxWidth: 600, marginTop: 16 }}
-      >
-        <Alert
-          message="Control how many posts are published per cycle and filter by age."
-          type="info"
-          showIcon
-          icon={<InfoCircleOutlined />}
-          style={{ marginBottom: 20 }}
-        />
-        <Form
-          form={publishForm}
-          layout="vertical"
-          onFinish={handlePublishSubmit}
-          initialValues={{ max_posts: 1, min_date: "" }}
-        >
-          <Form.Item
-            name="max_posts"
-            label="Max Posts Per Cycle"
-            rules={[{ required: true, message: "Required" }]}
-            help="Maximum number of posts to publish each cycle. Set to 0 to publish all pending posts."
-          >
-            <InputNumber min={0} max={100} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item
-            name="min_date"
-            label="Minimum Date"
-            help="Skip posts older than this date. Format: YYYY-MM-DD or RFC3339 (e.g. 2024-01-15T10:00:00Z). Leave empty for no filter."
-          >
-            <Input placeholder="2024-01-01" />
-          </Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={publishSaving}
-            icon={<SaveOutlined />}
-          >
-            Save Publish Settings
-          </Button>
-        </Form>
       </Card>
     </div>
   )
