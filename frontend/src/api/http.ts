@@ -46,7 +46,29 @@ export interface DashboardStatus {
   next_run_at: string | null;
 }
 
-import { getToken } from "../store/auth";
+import { getToken, setToken, clearToken } from "../store/auth";
+
+// Estado global para evitar múltiples refrescos concurrentes
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  const currentToken = getToken();
+  if (!currentToken) return null;
+
+  try {
+    const res = await fetch("/auth/refresh", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${currentToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const newToken = data.access_token;
+    setToken(newToken);
+    return newToken;
+  } catch {
+    return null;
+  }
+}
 
 async function fetcher<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<T> {
   const token = getToken();
@@ -58,6 +80,35 @@ async function fetcher<T>(path: string, opts?: { method?: string; body?: unknown
     headers,
     body: opts?.body ? JSON.stringify(opts.body) : undefined,
   });
+
+  // 🔄 Interceptor 401: intentar refresh antes de fallar
+  if (res.status === 401 && token) {
+    // Evitar múltiples refrescos concurrentes
+    if (!refreshPromise) {
+      refreshPromise = refreshAccessToken().finally(() => {
+        refreshPromise = null;
+      });
+    }
+
+    const newToken = await refreshPromise;
+    if (newToken) {
+      // Reintentar con el nuevo token
+      headers["Authorization"] = `Bearer ${newToken}`;
+      const retry = await fetch(path, {
+        method: opts?.method ?? (opts?.body ? "POST" : "GET"),
+        headers,
+        body: opts?.body ? JSON.stringify(opts.body) : undefined,
+      });
+      if (retry.ok) {
+        if (retry.status === 204) return undefined as T;
+        return retry.json();
+      }
+    }
+
+    // Refresh falló → limpiar y dejar que ProtectedRoute redirija
+    clearToken();
+    throw new Error("Session expired");
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "unknown error");

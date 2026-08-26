@@ -256,12 +256,14 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
         }
 
         // Clean up old logs based on retention setting
+        // IMPORTANT: delete from child table (publish_results) BEFORE parent (published_posts)
+        // to avoid foreign key constraint violations
         let retention_days = db.get_log_retention().await.unwrap_or(30) as i64;
-        if let Err(e) = db.cleanup_old_posts(retention_days).await {
-            tracing::error!("Failed to cleanup old posts: {}", e);
-        }
         if let Err(e) = db.cleanup_old_publish_results(retention_days).await {
             tracing::error!("Failed to cleanup old publish results: {}", e);
+        }
+        if let Err(e) = db.cleanup_old_posts(retention_days).await {
+            tracing::error!("Failed to cleanup old posts: {}", e);
         }
 
         // Read schedule and sleep until next cron tick
@@ -418,6 +420,11 @@ mod tests {
     #[test]
     fn test_is_public_path_auth_callback_with_query() {
         assert!(is_public_path("/auth/callback?code=xxx"));
+    }
+
+    #[test]
+    fn test_is_public_path_auth_refresh() {
+        assert!(is_public_path("/auth/refresh"));
     }
 
     #[test]

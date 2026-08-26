@@ -346,7 +346,10 @@ pub async fn run(
 
             if is_dry_run {
                 response["dry_run"] = json!(true);
-                response["message"] = json!(format!("Dry run: {} post(s) would be published", new_posts.len()));
+                response["message"] = json!(format!(
+                    "Dry run: {} post(s) would be published",
+                    new_posts.len()
+                ));
             }
 
             (StatusCode::OK, Json(response)).into_response()

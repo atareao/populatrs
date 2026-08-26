@@ -37,9 +37,9 @@ struct TokenResponse {
     access_token: String,
     #[allow(dead_code)]
     token_type: String,
-    #[allow(dead_code)]
     expires_in: u64,
     id_token: Option<String>,
+    refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,7 +215,10 @@ pub async fn callback(
     };
 
     let access_token = token_data.access_token.clone();
-    let jwt = token_data.id_token.unwrap_or(token_data.access_token);
+    let jwt = token_data
+        .id_token
+        .clone()
+        .unwrap_or(token_data.access_token);
 
     let userinfo_url = format!("{}/api/oidc/userinfo", issuer.trim_end_matches('/'));
     let user_info = match client
@@ -227,6 +230,29 @@ pub async fn callback(
         Ok(resp) => resp.json::<UserInfoResponse>().await.ok(),
         Err(_) => None,
     };
+
+    // Guardar refresh_token si está presente
+    if let Some(ref refresh_token) = token_data.refresh_token {
+        let user_id = user_info
+            .as_ref()
+            .map(|u| u.sub.clone())
+            .unwrap_or_else(|| {
+                // Fallback: extraer sub del id_token (sin async aquí)
+                token_data
+                    .id_token
+                    .as_deref()
+                    .and_then(extract_sub_from_jwt)
+                    .unwrap_or_default()
+            });
+        if !user_id.is_empty() {
+            state
+                .db
+                .save_refresh_token(&user_id, refresh_token, token_data.expires_in)
+                .await
+                .map_err(|e| tracing::warn!("Failed to save refresh token: {}", e))
+                .ok();
+        }
+    }
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -298,6 +324,132 @@ pub async fn me(axum::Extension(user): axum::Extension<AuthUser>) -> Json<MeResp
         email: user.email,
         name: user.name,
     })
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshResponse {
+    pub access_token: String,
+    pub expires_in: u64,
+}
+
+/// Refresca el access_token usando el refresh_token almacenado en SQLite.
+///
+/// 1. Extrae el user_id del token JWT actual (aunque esté expirado, se decodifica
+///    sin verificar firma para obtener el `sub`)
+/// 2. Lee el refresh_token de SQLite
+/// 3. Lo canjea en PocketID por un nuevo access_token + refresh_token (rotación)
+/// 4. Guarda el nuevo refresh_token
+/// 5. Devuelve el nuevo access_token
+///
+/// En modo dev (sin OIDC), devuelve un token de desarrollo.
+#[instrument(skip(state))]
+pub async fn refresh_token(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<RefreshResponse>, StatusCode> {
+    // Modo dev: devolver token de desarrollo
+    if state.jwt_validator.is_dev() {
+        return Ok(Json(RefreshResponse {
+            access_token: "dev-token".to_string(),
+            expires_in: 3600,
+        }));
+    }
+
+    // Extraer user_id del token JWT (puede estar expirado — validamos firma pero no expiración)
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Validate the JWT (signature + issuer + audience) but allow expired tokens
+    let claims = state
+        .jwt_validator
+        .validate_token_ignore_expiry(token)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let user_id = claims.sub;
+
+    // 1. Obtener refresh_token de SQLite
+    let refresh_token = state
+        .db
+        .get_refresh_token(&user_id)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // 2. Canjear en PocketID
+    let issuer = state
+        .config
+        .oidc_issuer_url
+        .as_deref()
+        .ok_or(StatusCode::BAD_GATEWAY)?;
+    let token_url = format!("{}/api/oidc/token", issuer.trim_end_matches('/'));
+    let client_id = state.config.oidc_client_id.as_deref().unwrap_or("");
+    let client_secret = state.config.oidc_client_secret.as_deref().unwrap_or("");
+
+    let params = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", &refresh_token),
+        ("client_id", client_id),
+        ("client_secret", client_secret),
+    ];
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&token_url)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    if !resp.status().is_success() {
+        // Only delete if the stored token is the one we just failed with
+        // (avoids deleting a freshly rotated token from a concurrent request)
+        if let Ok(Some(stored)) = state.db.get_refresh_token(&user_id).await {
+            if stored == refresh_token {
+                state.db.delete_refresh_token(&user_id).await.ok();
+            }
+        }
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let token_data: TokenResponse = resp.json().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    // 3. Guardar nuevo refresh_token (rotación)
+    if let Some(new_refresh) = &token_data.refresh_token {
+        state
+            .db
+            .save_refresh_token(&user_id, new_refresh, token_data.expires_in)
+            .await
+            .map_err(|e| tracing::warn!("Failed to save refresh token: {}", e))
+            .ok();
+    }
+
+    // 4. Devolver nuevo access_token
+    Ok(Json(RefreshResponse {
+        access_token: token_data.access_token,
+        expires_in: token_data.expires_in,
+    }))
+}
+
+/// Extrae el `sub` de un JWT sin verificar la firma.
+/// Solo usado en el callback OIDC como fallback cuando userinfo falla;
+/// el token acaba de ser emitido por el proveedor, no hay riesgo de suplantación.
+fn extract_sub_from_jwt(token: &str) -> Option<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    use base64::Engine;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    claims.get("sub")?.as_str().map(|s| s.to_string())
 }
 
 #[cfg(test)]
