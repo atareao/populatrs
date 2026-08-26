@@ -64,6 +64,5 @@ pub async fn update_publish_settings(
             .into_response();
     }
 
-    Json(json!({"status": "ok", "message": "Publish settings saved"}))
-        .into_response()
+    Json(json!({"status": "ok", "message": "Publish settings saved"})).into_response()
 }
