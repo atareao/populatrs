@@ -1,9 +1,18 @@
 # Changelog
+## [0.4.13] - 2026-08-26
+
+### Features
+
+- Reorganize Settings view with Ant Design Tabs
 ## [0.4.12] - 2026-08-26
 
 ### Features
 
 - Implement OIDC refresh token support (#41)
+
+### Miscellaneous Tasks
+
+- Release v0.4.12
 ## [0.4.11] - 2026-08-25
 
 ### Bug Fixes
