@@ -524,12 +524,7 @@ pub async fn status(
             access_token,
             refresh_token,
             ..
-        } => (
-            access_token.is_some(),
-            None,
-            refresh_token.is_some(),
-            "x",
-        ),
+        } => (access_token.is_some(), None, refresh_token.is_some(), "x"),
         PublisherConfig::LinkedIn {
             access_token,
             refresh_token,
@@ -544,20 +539,10 @@ pub async fn status(
             access_token,
             token_expires_at,
             ..
-        } => (
-            access_token.is_some(),
-            *token_expires_at,
-            false,
-            "threads",
-        ),
-        PublisherConfig::Mastodon {
-            access_token, ..
-        } => (
-            access_token.is_some(),
-            None,
-            false,
-            "mastodon",
-        ),
+        } => (access_token.is_some(), *token_expires_at, false, "threads"),
+        PublisherConfig::Mastodon { access_token, .. } => {
+            (access_token.is_some(), None, false, "mastodon")
+        }
         _ => {
             return (
                 StatusCode::BAD_REQUEST,

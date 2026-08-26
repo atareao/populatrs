@@ -134,6 +134,32 @@ impl JwtValidator {
         }
         Err("no matching JWK found for token".to_string())
     }
+
+    /// Validate a token ignoring expiration (for refresh flows).
+    /// Verifies signature, issuer, and audience, but allows expired tokens.
+    pub async fn validate_token_ignore_expiry(&self, token: &str) -> Result<JwtClaims, String> {
+        let keys = {
+            let jwks = self.jwks.read().await;
+            if jwks.is_empty() {
+                drop(jwks);
+                self.fetch_jwks(&self.issuer).await?;
+                return Box::pin(self.validate_token_ignore_expiry(token)).await;
+            }
+            jwks.clone()
+        };
+
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[&self.issuer]);
+        validation.set_audience(&[&self.client_id]);
+        validation.validate_exp = false; // Allow expired tokens
+
+        for key in &keys {
+            if let Ok(claims) = jsonwebtoken::decode::<JwtClaims>(token, key, &validation) {
+                return Ok(claims.claims);
+            }
+        }
+        Err("no matching JWK found for token".to_string())
+    }
 }
 
 // ───── JWT Claims ─────

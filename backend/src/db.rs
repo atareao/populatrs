@@ -93,7 +93,7 @@ impl Database {
                 success INTEGER NOT NULL,
                 message TEXT,
                 published_at TEXT NOT NULL,
-                FOREIGN KEY (guid, feed_id) REFERENCES published_posts(guid, feed_id)
+                FOREIGN KEY (guid, feed_id) REFERENCES published_posts(guid, feed_id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_publish_results_published_at
@@ -110,6 +110,13 @@ impl Database {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                user_id TEXT PRIMARY KEY,
+                refresh_token TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             ",
         )
         .context("Failed to run database migrations")?;
@@ -119,6 +126,44 @@ impl Database {
 
         // Migration: add description column to published_posts for existing databases
         let _ = conn.execute_batch("ALTER TABLE published_posts ADD COLUMN description TEXT;");
+
+        // Migration: add ON DELETE CASCADE to publish_results foreign key
+        // This ensures deleting from published_posts automatically cleans up related publish_results
+        let migration_applied = conn
+            .query_row(
+                "SELECT 1 FROM settings WHERE key = 'migration_publish_results_cascade' AND value = '1'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok();
+
+        if !migration_applied {
+            let recreate_result = conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS publish_results_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guid TEXT NOT NULL,
+                    feed_id TEXT NOT NULL,
+                    publisher_id TEXT NOT NULL,
+                    success INTEGER NOT NULL,
+                    message TEXT,
+                    published_at TEXT NOT NULL,
+                    FOREIGN KEY (guid, feed_id) REFERENCES published_posts(guid, feed_id) ON DELETE CASCADE
+                );
+                INSERT INTO publish_results_new (id, guid, feed_id, publisher_id, success, message, published_at)
+                    SELECT id, guid, feed_id, publisher_id, success, message, published_at FROM publish_results;
+                DROP TABLE publish_results;
+                ALTER TABLE publish_results_new RENAME TO publish_results;
+                CREATE INDEX IF NOT EXISTS idx_publish_results_published_at
+                    ON publish_results(published_at);
+                INSERT OR IGNORE INTO settings (key, value) VALUES ('migration_publish_results_cascade', '1');
+                ",
+            );
+            if let Err(e) = recreate_result {
+                // If migration fails (e.g., table doesn't exist yet on fresh install), that's OK
+                tracing::warn!("publish_results cascade migration skipped: {}", e);
+            }
+        }
 
         Ok(())
     }
@@ -788,10 +833,14 @@ impl Database {
                             .or_else(|_| {
                                 // Try YYYY-MM-DD format
                                 chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
-                                    .map(|d| {
-                                        Some(d.and_hms_opt(0, 0, 0).unwrap().and_utc())
+                                    .map(|d| Some(d.and_hms_opt(0, 0, 0).unwrap().and_utc()))
+                                    .map_err(|e| {
+                                        anyhow::anyhow!(
+                                            "Failed to parse min_date '{}': {}",
+                                            date_str,
+                                            e
+                                        )
                                     })
-                                    .map_err(|e| anyhow::anyhow!("Failed to parse min_date '{}': {}", date_str, e))
                             })
                     }
                 }
@@ -893,6 +942,58 @@ impl Database {
             params![key, value],
         )
         .context("Failed to set setting")?;
+        Ok(())
+    }
+
+    // ───── Refresh Tokens ─────
+
+    /// Save a refresh token for a user (upsert).
+    /// The `_expires_in` parameter is the access token lifetime and is ignored;
+    /// refresh tokens in PocketID live 30 days, so we use that as the stored expiry.
+    pub async fn save_refresh_token(
+        &self,
+        user_id: &str,
+        refresh_token: &str,
+        _expires_in: u64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        // Refresh tokens in PocketID live 30 days; use that as the stored expiry
+        let expires_at =
+            (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+        conn.execute(
+            "INSERT INTO refresh_tokens (user_id, refresh_token, expires_at) \
+             VALUES (?1, ?2, ?3) \
+             ON CONFLICT(user_id) DO UPDATE SET \
+             refresh_token = excluded.refresh_token, \
+             expires_at = excluded.expires_at",
+            params![user_id, refresh_token, expires_at],
+        )
+        .context("Failed to save refresh token")?;
+        Ok(())
+    }
+
+    /// Get the stored refresh token for a user.
+    pub async fn get_refresh_token(&self, user_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let token = conn
+            .query_row(
+                "SELECT refresh_token FROM refresh_tokens WHERE user_id = ?1",
+                params![user_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("Failed to query refresh token")?;
+        Ok(token)
+    }
+
+    /// Delete a stored refresh token for a user.
+    pub async fn delete_refresh_token(&self, user_id: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM refresh_tokens WHERE user_id = ?1",
+            params![user_id],
+        )
+        .context("Failed to delete refresh token")?;
         Ok(())
     }
 

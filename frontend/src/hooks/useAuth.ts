@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { fetchMe, type User } from "../api/http";
-import { clearToken } from "../store/auth";
 
 function getToken(): string | null {
   try {
@@ -24,9 +23,11 @@ export function useAuth() {
     fetchMe()
       .then(setUser)
       .catch(() => {
-        clearToken();
-        setUser(null);
-      })
+          // NO limpiar token aquí — el interceptor de 401 ya lo hizo
+          // si el refresh falló. Si el error es de red, el token sigue
+          // siendo válido y no debemos borrarlo.
+          setUser(null);
+        })
       .finally(() => setLoading(false));
   }, []);
 
