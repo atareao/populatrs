@@ -958,8 +958,7 @@ impl Database {
     ) -> Result<()> {
         let conn = self.conn.lock().await;
         // Refresh tokens in PocketID live 30 days; use that as the stored expiry
-        let expires_at =
-            (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+        let expires_at = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
         conn.execute(
             "INSERT INTO refresh_tokens (user_id, refresh_token, expires_at) \
              VALUES (?1, ?2, ?3) \

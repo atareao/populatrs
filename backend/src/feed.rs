@@ -2,10 +2,16 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 
-use crate::models::{FeedConfig, FeedTypeConfig, Post, YouTubeGlobalConfig};
+use crate::models::{FeedCacheMetadata, FeedConfig, FeedTypeConfig, Post, YouTubeGlobalConfig};
 
-/// Fetch posts from an RSS feed URL.
-pub async fn fetch_rss_posts(config: &FeedConfig) -> Result<Vec<Post>> {
+/// Fetch posts from an RSS feed URL, using the provided cache metadata for
+/// conditional HTTP requests (ETag / Last-Modified) and content-hash comparison.
+/// Returns the posts (empty when the feed is unchanged) along with the updated
+/// cache metadata to persist.
+pub async fn fetch_rss_posts(
+    config: &FeedConfig,
+    cache: &FeedCacheMetadata,
+) -> Result<(Vec<Post>, FeedCacheMetadata)> {
     let url = match &config.config {
         FeedTypeConfig::Rss { url } => url.clone(),
         _ => anyhow::bail!("Not an RSS feed config"),
@@ -20,8 +26,8 @@ pub async fn fetch_rss_posts(config: &FeedConfig) -> Result<Vec<Post>> {
     let base_delay = config.retry_delay_seconds.unwrap_or(2);
 
     for attempt in 0..=max_retries {
-        match fetch_rss_with_retry(&client, &url).await {
-            Ok(posts) => {
+        match fetch_rss_with_retry(&client, &url, cache).await {
+            Ok((posts, new_cache)) => {
                 if attempt > 0 {
                     tracing::info!(
                         "Successfully fetched feed {} on attempt {}/{}",
@@ -30,7 +36,7 @@ pub async fn fetch_rss_posts(config: &FeedConfig) -> Result<Vec<Post>> {
                         max_retries + 1
                     );
                 }
-                return Ok(posts);
+                return Ok((posts, new_cache));
             }
             Err(err) => {
                 if attempt == max_retries {
@@ -56,30 +62,83 @@ pub async fn fetch_rss_posts(config: &FeedConfig) -> Result<Vec<Post>> {
     unreachable!()
 }
 
-async fn fetch_rss_with_retry(client: &Client, url: &str) -> Result<Vec<Post>> {
-    let response = client
-        .get(url)
+async fn fetch_rss_with_retry(
+    client: &Client,
+    url: &str,
+    cache: &FeedCacheMetadata,
+) -> Result<(Vec<Post>, FeedCacheMetadata)> {
+    let mut request = client.get(url);
+
+    // Add conditional headers from cache
+    if let Some(etag) = &cache.etag {
+        request = request.header("If-None-Match", etag);
+    }
+    if let Some(last_modified) = &cache.last_modified {
+        request = request.header("If-Modified-Since", last_modified);
+    }
+
+    let response = request
         .send()
         .await
         .context("Failed to send HTTP request")?;
 
-    if !response.status().is_success() {
-        anyhow::bail!("HTTP {}", response.status());
+    let status = response.status();
+
+    // 304 Not Modified — feed has not changed
+    if status == reqwest::StatusCode::NOT_MODIFIED {
+        tracing::debug!("Feed unchanged (304 Not Modified): {}", url);
+        return Ok((Vec::new(), cache.clone()));
     }
+
+    if !status.is_success() {
+        anyhow::bail!("HTTP {}", status);
+    }
+
+    // Extract new ETag and Last-Modified from response headers *before* consuming body
+    let new_etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let new_last_modified = response
+        .headers()
+        .get(reqwest::header::LAST_MODIFIED)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
 
     let content = response
         .text()
         .await
         .context("Failed to read response body")?;
 
+    // Compute SHA-256 hash of content to detect changes
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let content_hash = format!("{:x}", hasher.finalize());
+
+    let new_cache = FeedCacheMetadata {
+        etag: new_etag,
+        last_modified: new_last_modified,
+        last_content_hash: Some(content_hash.clone()),
+    };
+
+    // If content hash matches the previous one, no real changes
+    if let Some(prev_hash) = &cache.last_content_hash {
+        if prev_hash == &content_hash {
+            tracing::debug!("Feed content unchanged (hash match): {}", url);
+            return Ok((Vec::new(), new_cache));
+        }
+    }
+
     // Try RSS first
     if let Ok(channel) = content.parse::<rss::Channel>() {
-        return Ok(parse_rss_channel(channel));
+        return Ok((parse_rss_channel(channel), new_cache));
     }
 
     // Try Atom via feed-rs
     if let Ok(feed) = feed_rs::parser::parse(content.as_bytes()) {
-        return Ok(parse_feed_rs(feed));
+        return Ok((parse_feed_rs(feed), new_cache));
     }
 
     anyhow::bail!("Unable to parse feed as RSS or Atom")

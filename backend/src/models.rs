@@ -310,7 +310,7 @@ impl Post {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FeedCacheMetadata {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
@@ -331,17 +331,23 @@ impl Feed {
         }
     }
 
-    pub async fn fetch_posts(&self) -> anyhow::Result<Vec<Post>> {
-        let mut posts = match self.config.feed_type.to_lowercase().as_str() {
-            "rss" => crate::feed::fetch_rss_posts(&self.config).await?,
+    pub async fn fetch_posts(
+        &self,
+        cache: &FeedCacheMetadata,
+    ) -> anyhow::Result<(Vec<Post>, FeedCacheMetadata)> {
+        let (mut posts, new_cache) = match self.config.feed_type.to_lowercase().as_str() {
+            "rss" => crate::feed::fetch_rss_posts(&self.config, cache).await?,
             "youtube" => {
-                crate::feed::fetch_youtube_posts(&self.config, self.youtube_config.as_ref()).await?
+                let posts =
+                    crate::feed::fetch_youtube_posts(&self.config, self.youtube_config.as_ref())
+                        .await?;
+                (posts, FeedCacheMetadata::default())
             }
             other => return Err(anyhow::anyhow!("Unknown feed type: {}", other)),
         };
         // Sort oldest-first so posts are published in chronological order
         posts.sort_by_key(|p| p.published_date);
-        Ok(posts)
+        Ok((posts, new_cache))
     }
 }
 
@@ -381,25 +387,36 @@ impl FeedManager {
         self.cache.clone()
     }
 
-    pub async fn check_all_feeds(&mut self) -> Vec<(String, anyhow::Result<Vec<Post>>)> {
+    pub async fn check_all_feeds(
+        &mut self,
+    ) -> (
+        Vec<(String, anyhow::Result<Vec<Post>>)>,
+        HashMap<String, FeedCacheMetadata>,
+    ) {
         let mut results = Vec::new();
         for feed_config in &self.feeds {
             if !feed_config.enabled {
                 continue;
             }
             let feed = Feed::new(feed_config.clone(), self.youtube_config.clone());
-            let result = feed.fetch_posts().await.map(|posts| {
-                posts
-                    .into_iter()
-                    .map(|mut p| {
-                        p.feed_id = feed_config.id.clone();
-                        p
-                    })
-                    .collect()
-            });
+            let cache_meta = self.cache.get(&feed_config.id).cloned().unwrap_or_default();
+            let result = feed
+                .fetch_posts(&cache_meta)
+                .await
+                .map(|(posts, new_cache)| {
+                    self.cache.insert(feed_config.id.clone(), new_cache);
+                    posts
+                        .into_iter()
+                        .map(|mut p| {
+                            p.feed_id = feed_config.id.clone();
+                            p
+                        })
+                        .collect()
+                });
             results.push((feed_config.id.clone(), result));
         }
-        results
+        let updated_cache = self.cache.clone();
+        (results, updated_cache)
     }
 }
 

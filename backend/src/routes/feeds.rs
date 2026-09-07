@@ -14,7 +14,7 @@ use tracing::instrument;
 use url::Url;
 
 use crate::auth::AppState;
-use crate::models::FeedConfig;
+use crate::models::{FeedCacheMetadata, FeedConfig};
 
 #[derive(Debug, Deserialize, Default)]
 pub struct RunQuery {
@@ -65,8 +65,8 @@ pub async fn create(
         Ok(()) => {
             // Fetch initial items and mark them as seen (prevents publishing backlog)
             let feed_model = crate::models::Feed::new(feed.clone(), None);
-            match feed_model.fetch_posts().await {
-                Ok(initial_posts) => {
+            match feed_model.fetch_posts(&FeedCacheMetadata::default()).await {
+                Ok((initial_posts, _)) => {
                     let count = initial_posts.len();
                     for post in &initial_posts {
                         state
@@ -208,8 +208,8 @@ pub async fn run(
 
     let youtube_config = state.db.get_youtube_config().await.unwrap_or(None);
     let feed = crate::models::Feed::new(feed_config.clone(), youtube_config);
-    match feed.fetch_posts().await {
-        Ok(posts) => {
+    match feed.fetch_posts(&FeedCacheMetadata::default()).await {
+        Ok((posts, _)) => {
             let posts: Vec<_> = posts
                 .into_iter()
                 .map(|mut p| {
