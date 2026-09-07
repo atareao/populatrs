@@ -114,10 +114,25 @@ pub async fn run_feed_check(
         tracing::info!("MAX_POSTS=0: publishing all pending posts");
     }
 
-    let feed_results = {
+    let (feed_results, updated_cache) = {
         let mut manager = feed_manager.lock().await;
         manager.check_all_feeds().await
     };
+
+    // Persist updated cache metadata to database
+    for (feed_id, cache_meta) in &updated_cache {
+        if let Err(e) = db
+            .upsert_feed_cache(
+                feed_id,
+                cache_meta.etag.as_deref(),
+                cache_meta.last_modified.as_deref(),
+                cache_meta.last_content_hash.as_deref(),
+            )
+            .await
+        {
+            tracing::warn!("Failed to persist cache for feed {}: {}", feed_id, e);
+        }
+    }
 
     let mut total_new_posts = 0;
     let mut total_published = 0;

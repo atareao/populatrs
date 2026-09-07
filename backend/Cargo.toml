@@ -61,6 +61,7 @@ minijinja = "2.19"
 # Crypto (OAuth PKCE / HMAC)
 hmac = "0.13"
 sha1 = "0.11"
+sha2 = "0.10"
 md5 = "0.8"
 
 # Time & scheduling

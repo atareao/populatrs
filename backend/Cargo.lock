@@ -1624,7 +1624,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "populatrs"
-version = "0.4.11"
+version = "0.4.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1651,6 +1651,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha1",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-stream",
