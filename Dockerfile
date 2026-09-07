@@ -33,8 +33,8 @@ FROM docker.io/library/node:23-alpine AS frontend-builder
 RUN npm install -g pnpm@latest
 
 WORKDIR /build
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --ignore-scripts && pnpm rebuild esbuild
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/.npmrc ./
+RUN pnpm install
 
 COPY frontend/ ./
 RUN CI=true pnpm build
