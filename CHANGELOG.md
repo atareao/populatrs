@@ -1,13 +1,33 @@
 # Changelog
+## [0.4.14] - 2026-09-07
+
+### Bug Fixes
+
+- *(docker)* Copy pnpm-workspace.yaml and respect allowBuilds for esbuild
+
+### Features
+
+- *(feed)* Implement conditional HTTP caching with ETag, Last-Modified and content-hash
 ## [0.4.13] - 2026-08-26
 
 ### Features
 
 - Reorganize Settings view with Ant Design Tabs
+
+### Miscellaneous Tasks
+
+- Release v0.4.13
 ## [0.4.12] - 2026-08-26
+
+### Bug Fixes
+
+- Persist refreshed X tokens to database by passing DB reference to PublisherManager
+- MAX_POSTS selects newest posts, published in chronological order
 
 ### Features
 
+- Reconnect OAuth publishers with status endpoint and UI
+- Publish settings (MAX_POSTS, MIN_DATE) and dry-run mode
 - Implement OIDC refresh token support (#41)
 
 ### Miscellaneous Tasks
@@ -17,17 +37,12 @@
 
 ### Bug Fixes
 
-- MAX_POSTS selects newest posts, published in chronological order
 - MAX_POSTS selects newest posts
 
 ### Miscellaneous Tasks
 
 - Release v0.4.11
 ## [0.4.10] - 2026-08-25
-
-### Features
-
-- Publish settings (MAX_POSTS, MIN_DATE) and dry-run mode
 
 ### Miscellaneous Tasks
 
@@ -37,12 +52,7 @@
 ### Bug Fixes
 
 - Persist refreshed X tokens to database by passing DB reference to PublisherManager
-- Persist refreshed X tokens to database by passing DB reference to PublisherManager
 - Persist refreshed X tokens to database
-
-### Features
-
-- Reconnect OAuth publishers with status endpoint and UI
 
 ### Miscellaneous Tasks
 
@@ -112,12 +122,29 @@
 
 ### Bug Fixes
 
+- *(ci)* Use github.token instead of secrets.GH_PAT for sync step
+- *(ci)* Proper merge sync of development with main after release
 - *(ci)* Add --manifest-path backend/ to all cargo commands
 - *(ci)* Prevent recursive Prepare Release + explicit Release trigger
+
+### Documentation
+
+- Rewrite README to reflect current web app architecture
+- Add populatrs.env.example with all env vars and fix README table
+
+### Features
+
+- Add YouTube API config, publisher manager, and feed publish endpoint
+- Add cron-based schedule with settings UI and dashboard timing (#19)
+- OIDC state, timezone-aware cron, Threads fix, cron presets
 
 ### Other
 
 - 0.4.0 — Cron presets, YouTube publisher, docs
+
+### Styling
+
+- Add app icon to favicon and login page
 ## [0.3.10] - 2026-07-27
 
 ### Bug Fixes
@@ -132,8 +159,6 @@
 
 ### Bug Fixes
 
-- *(ci)* Use github.token instead of secrets.GH_PAT for sync step
-- *(ci)* Proper merge sync of development with main after release
 - *(ci)* Use github.token instead of secrets.GH_PAT for sync step
 
 ### Miscellaneous Tasks
@@ -164,19 +189,16 @@
 
 - *(threads)* Fix access_token as query param and user_id numeric parsing
 
-### Features
-
-- OIDC state, timezone-aware cron, Threads fix, cron presets
-
 ### Miscellaneous Tasks
 
 - Release v0.3.6
 ## [0.3.5] - 2026-07-25
 
-### Documentation
+### Features
 
-- Rewrite README to reflect current web app architecture
-- Add populatrs.env.example with all env vars and fix README table
+- *(oauth)* Add OAuth flows for Threads and Mastodon publishers
+- Improve publisher UI - replace switches with emojis, hide feed ID column, add test result modals
+- Improve publisher UI and add OAuth flows for Threads/Mastodon
 
 ### Miscellaneous Tasks
 
@@ -185,19 +207,7 @@
 ### Other
 
 - V0.4.0
-
-### Styling
-
-- Add app icon to favicon and login page
 ## [0.3.4] - 2026-07-23
-
-### Features
-
-- *(oauth)* Add OAuth flows for Threads and Mastodon publishers
-- Improve publisher UI - replace switches with emojis, hide feed ID column, add test result modals
-- Improve publisher UI and add OAuth flows for Threads/Mastodon
-- Add YouTube API config, publisher manager, and feed publish endpoint
-- Add cron-based schedule with settings UI and dashboard timing (#19)
 
 ### Miscellaneous Tasks
 
@@ -253,6 +263,7 @@
 
 ### Miscellaneous Tasks
 
+- Add crates.io publish job to release workflow
 - Release v0.2.0
 
 ### Refactor
@@ -273,7 +284,6 @@
 ### Miscellaneous Tasks
 
 - Release v0.1.4
-- Add crates.io publish job to release workflow
 - Add crates.io publish job to release workflow
 ## [0.1.3] - 2026-06-23
 
