@@ -1,4 +1,10 @@
 # Changelog
+## [0.4.15] - 2026-09-07
+
+### Bug Fixes
+
+- *(feed)* Use browser User-Agent to avoid CDN blocking
+- *(feed)* Use browser User-Agent to avoid CDN blocking
 ## [0.4.14] - 2026-09-07
 
 ### Bug Fixes
@@ -8,6 +14,10 @@
 ### Features
 
 - *(feed)* Implement conditional HTTP caching with ETag, Last-Modified and content-hash
+
+### Miscellaneous Tasks
+
+- Release v0.4.14
 ## [0.4.13] - 2026-08-26
 
 ### Features
