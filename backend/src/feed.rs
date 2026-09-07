@@ -18,7 +18,7 @@ pub async fn fetch_rss_posts(
     };
 
     let client = Client::builder()
-        .user_agent("Populatrs RSS Reader 1.0")
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build()
         .context("Failed to create HTTP client")?;
 
@@ -244,7 +244,10 @@ pub async fn fetch_youtube_posts(
         .or(youtube_global.default_max_results)
         .unwrap_or(10);
 
-    let client = Client::new();
+    let client = Client::builder()
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .context("Failed to create HTTP client")?;
     let api_key = &youtube_global.api_key;
 
     // If playlist_id is provided, fetch from playlist
