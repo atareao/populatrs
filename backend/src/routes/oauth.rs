@@ -334,7 +334,7 @@ pub async fn callback(
             let mut states = state.oauth_states.lock().await;
             let stored = states.remove(&format!("linkedin:{id}"));
             match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some(stored) if stored.state == *cb_state => { /* ok */ }
                 Some(_) => {
                     return (
                         StatusCode::UNAUTHORIZED,
@@ -410,7 +410,7 @@ pub async fn callback(
             let mut states = state.oauth_states.lock().await;
             let stored = states.remove(&format!("threads:{id}"));
             match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some(stored) if stored.state == *cb_state => { /* ok */ }
                 Some(_) => {
                     return (
                         StatusCode::UNAUTHORIZED,
@@ -487,7 +487,7 @@ pub async fn callback(
             let mut states = state.oauth_states.lock().await;
             let stored = states.remove(&format!("mastodon:{id}"));
             match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some(stored) if stored.state == *cb_state => { /* ok */ }
                 Some(_) => {
                     return (
                         StatusCode::UNAUTHORIZED,
@@ -946,7 +946,7 @@ pub async fn callback_get(
             };
 
             let (access_token, refresh_token, _) =
-                match x_pub.exchange_code_for_tokens(&code, &code_verifier).await {
+                match x_pub.exchange_code_for_tokens(&code, code_verifier).await {
                     Ok(tokens) => tokens,
                     Err(e) => {
                         return (

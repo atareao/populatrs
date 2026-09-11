@@ -60,8 +60,7 @@ pub struct OAuthState {
     pub code_verifier: Option<String>,
 }
 
-pub type OAuthStates =
-    Arc<tokio::sync::Mutex<std::collections::HashMap<String, OAuthState>>>;
+pub type OAuthStates = Arc<tokio::sync::Mutex<std::collections::HashMap<String, OAuthState>>>;
 
 // ───── JWT Validator ─────
 

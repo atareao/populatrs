@@ -37,9 +37,8 @@ impl XPublisher {
             Uuid::new_v4().to_string().replace('-', ""),
             Uuid::new_v4().to_string().replace('-', "")
         );
-        let code_challenge = general_purpose::URL_SAFE_NO_PAD.encode(
-            Sha256::digest(code_verifier.as_bytes()),
-        );
+        let code_challenge =
+            general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
         (code_verifier, code_challenge)
     }
 
@@ -146,55 +145,6 @@ impl XPublisher {
             {
                 let mut access_guard = self.access_token.lock().await;
                 *access_guard = Some(access_token.clone());
-            }
-
-            #[cfg(test)]
-            mod tests {
-                use super::*;
-                use std::collections::HashMap;
-
-                fn make_publisher() -> XPublisher {
-                    XPublisher::new(
-                        "test-x".to_string(),
-                        "test_client_id".to_string(),
-                        "test_client_secret".to_string(),
-                        None,
-                        None,
-                        Some("https://example.com/oauth/callback".to_string()),
-                        "{{ title }}".to_string(),
-                        Some("{{ url }}".to_string()),
-                        None,
-                        None,
-                    )
-                }
-
-                #[test]
-                fn test_generate_auth_url_uses_s256_pkce() {
-                    let publisher = make_publisher();
-                    let (url, code_verifier) = publisher.generate_auth_url(Some("test-state".to_string()));
-                    let expected_challenge =
-                        general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
-
-                    assert!((43..=128).contains(&code_verifier.len()));
-
-                    let parsed = Url::parse(&url).unwrap();
-                    let params: HashMap<_, _> = parsed.query_pairs().into_owned().collect();
-
-                    assert_eq!(params.get("response_type").map(String::as_str), Some("code"));
-                    assert_eq!(
-                        params.get("client_id").map(String::as_str),
-                        Some("test_client_id")
-                    );
-                    assert_eq!(params.get("state").map(String::as_str), Some("test-state"));
-                    assert_eq!(
-                        params.get("code_challenge_method").map(String::as_str),
-                        Some("S256")
-                    );
-                    assert_eq!(
-                        params.get("code_challenge").map(String::as_str),
-                        Some(expected_challenge.as_str())
-                    );
-                }
             }
 
             if let Some(ref rt) = refresh_token {
@@ -625,5 +575,57 @@ impl Publisher for XPublisher {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_publisher() -> XPublisher {
+        XPublisher::new(
+            "test-x".to_string(),
+            "test_client_id".to_string(),
+            "test_client_secret".to_string(),
+            None,
+            None,
+            Some("https://example.com/oauth/callback".to_string()),
+            "{{ title }}".to_string(),
+            Some("{{ url }}".to_string()),
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn test_generate_auth_url_uses_s256_pkce() {
+        let publisher = make_publisher();
+        let (url, code_verifier) = publisher.generate_auth_url(Some("test-state".to_string()));
+        let expected_challenge =
+            general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+
+        assert!((43..=128).contains(&code_verifier.len()));
+
+        let parsed = Url::parse(&url).unwrap();
+        let params: HashMap<_, _> = parsed.query_pairs().into_owned().collect();
+
+        assert_eq!(
+            params.get("response_type").map(String::as_str),
+            Some("code")
+        );
+        assert_eq!(
+            params.get("client_id").map(String::as_str),
+            Some("test_client_id")
+        );
+        assert_eq!(params.get("state").map(String::as_str), Some("test-state"));
+        assert_eq!(
+            params.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
+        assert_eq!(
+            params.get("code_challenge").map(String::as_str),
+            Some(expected_challenge.as_str())
+        );
     }
 }
