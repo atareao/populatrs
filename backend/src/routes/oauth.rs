@@ -10,7 +10,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::auth::AppState;
+use crate::auth::{AppState, OAuthState};
 use crate::models::PublisherConfig;
 use crate::publisher::{
     create_publisher, create_publisher_with_config_path, LinkedInPublisher, MastodonPublisher,
@@ -38,7 +38,8 @@ pub struct OAuthCallbackQuery {
 ///
 /// Generates an OAuth 2.0 authorization URL for an X/Twitter, LinkedIn, or Threads
 /// publisher. The OAuth state is stored in `AppState.oauth_states` so it
-/// can be retrieved when the callback arrives.
+/// can be retrieved when the callback arrives, together with the PKCE verifier
+/// required by X/Twitter.
 pub async fn authorize(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -84,9 +85,16 @@ pub async fn authorize(
     // X/Twitter uses OAuth 2.0 PKCE — store the state for validation
     if let Some(x_pub) = publisher.as_any().downcast_ref::<XPublisher>() {
         let oauth_state = uuid::Uuid::new_v4().to_string();
-        let (auth_url, _code_verifier) = x_pub.generate_auth_url(Some(oauth_state.clone()));
+        let (auth_url, code_verifier) = x_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("x:{id}"), (oauth_state, Instant::now()));
+        states.insert(
+            format!("x:{id}"),
+            OAuthState {
+                state: oauth_state,
+                created_at: Instant::now(),
+                code_verifier: Some(code_verifier),
+            },
+        );
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -95,7 +103,14 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let auth_url = li_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("linkedin:{id}"), (oauth_state, Instant::now()));
+        states.insert(
+            format!("linkedin:{id}"),
+            OAuthState {
+                state: oauth_state,
+                created_at: Instant::now(),
+                code_verifier: None,
+            },
+        );
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -104,7 +119,14 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let auth_url = t_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("threads:{id}"), (oauth_state, Instant::now()));
+        states.insert(
+            format!("threads:{id}"),
+            OAuthState {
+                state: oauth_state,
+                created_at: Instant::now(),
+                code_verifier: None,
+            },
+        );
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -134,7 +156,14 @@ pub async fn authorize(
                                     let oauth_state = uuid::Uuid::new_v4().to_string();
                                     let auth_url_str = new_m_pub.generate_auth_url(Some(oauth_state.clone()));
                                     let mut states = state.oauth_states.lock().await;
-                                    states.insert(format!("mastodon:{id}"), (oauth_state, Instant::now()));
+                                    states.insert(
+                                        format!("mastodon:{id}"),
+                                        OAuthState {
+                                            state: oauth_state,
+                                            created_at: Instant::now(),
+                                            code_verifier: None,
+                                        },
+                                    );
                                     return Json(json!({ "ok": true, "url": auth_url_str })).into_response();
                                 }
                             }
@@ -152,7 +181,14 @@ pub async fn authorize(
             let oauth_state = uuid::Uuid::new_v4().to_string();
             let auth_url_str = m_pub.generate_auth_url(Some(oauth_state.clone()));
             let mut states = state.oauth_states.lock().await;
-            states.insert(format!("mastodon:{id}"), (oauth_state, Instant::now()));
+            states.insert(
+                format!("mastodon:{id}"),
+                OAuthState {
+                    state: oauth_state,
+                    created_at: Instant::now(),
+                    code_verifier: None,
+                },
+            );
             Json(json!({ "ok": true, "url": auth_url_str })).into_response()
         })
         .await;
@@ -216,27 +252,44 @@ pub async fn callback(
 
     // ── X/Twitter callback ──
     if let Some(x_pub) = publisher.as_any().downcast_ref::<XPublisher>() {
-        // Validate state if the frontend provided one
-        if let Some(ref cb_state) = payload.state {
+        let stored = {
             let mut states = state.oauth_states.lock().await;
-            let stored = states.remove(&format!("x:{id}"));
-            match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
-                Some(_) => {
-                    return (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({ "ok": false, "error": "OAuth state mismatch" })),
-                    )
-                        .into_response();
-                }
-                None => {
-                    tracing::warn!("No stored OAuth state found for X publisher {id}");
-                }
-            }
-        }
+            states.remove(&format!("x:{id}"))
+        };
 
-        // code_verifier is hardcoded to "challenge" in generate_auth_url
-        let code_verifier = "challenge".to_string();
+        let code_verifier = match (payload.state.as_deref(), stored) {
+            (Some(cb_state), Some(stored)) if stored.state == cb_state => stored.code_verifier,
+            (Some(_), Some(_)) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({ "ok": false, "error": "OAuth state mismatch" })),
+                )
+                    .into_response();
+            }
+            (Some(_), None) => {
+                tracing::warn!("No stored OAuth state found for X publisher {id}");
+                None
+            }
+            (None, Some(stored)) => {
+                tracing::warn!("OAuth callback without state for X publisher {id}");
+                stored.code_verifier
+            }
+            (None, None) => {
+                tracing::warn!("OAuth callback without state and verifier for X publisher {id}");
+                None
+            }
+        };
+
+        let code_verifier = match code_verifier {
+            Some(code_verifier) => code_verifier,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "ok": false, "error": "Missing PKCE verifier for X OAuth flow" })),
+                )
+                    .into_response();
+            }
+        };
 
         let (access_token, refresh_token, _expires_in) = match x_pub
             .exchange_code_for_tokens(&payload.code, &code_verifier)
@@ -568,11 +621,11 @@ pub async fn status(
 /// Helper: find publisher_id from the stored OAuth state value.
 /// Iterates the oauth_states map looking for a matching state value.
 fn resolve_publisher_id(
-    states: &std::collections::HashMap<String, (String, Instant)>,
+    states: &std::collections::HashMap<String, OAuthState>,
     target_state: &str,
 ) -> Option<String> {
-    for (key, (stored_state, _)) in states {
-        if stored_state == target_state {
+    for (key, stored) in states {
+        if stored.state == target_state {
             // key format is "linkedin:{id}", "threads:{id}", or "x:{id}"
             if let Some(id) = key.split(':').nth(1) {
                 return Some(id.to_string());
@@ -614,7 +667,7 @@ pub async fn callback_get(
     let state_param = query.state.as_deref().unwrap_or("");
 
     // ── 1. Resolve publisher_id and type from state ──
-    let (publisher_id, stored_state, oauth_type) = {
+    let (publisher_id, oauth_type) = {
         let states = state.oauth_states.lock().await;
         if let Some(id) = resolve_publisher_id(&states, state_param) {
             // Try to determine the type from stored keys
@@ -624,14 +677,26 @@ pub async fn callback_get(
             let stored_mastodon = states.get(&format!("mastodon:{id}"));
             let stored_x = states.get(&format!("x:{id}"));
 
-            if let Some((s, _)) = stored_threads.filter(|(s, _)| s == state_param) {
-                (id.clone(), s.clone(), "threads")
-            } else if let Some((s, _)) = stored_linkedin.filter(|(s, _)| s == state_param) {
-                (id.clone(), s.clone(), "linkedin")
-            } else if let Some((s, _)) = stored_mastodon.filter(|(s, _)| s == state_param) {
-                (id.clone(), s.clone(), "mastodon")
-            } else if let Some((s, _)) = stored_x.filter(|(s, _)| s == state_param) {
-                (id, s.clone(), "x")
+            if stored_threads
+                .map(|stored| stored.state.as_str() == state_param)
+                .unwrap_or(false)
+            {
+                (id.clone(), "threads")
+            } else if stored_linkedin
+                .map(|stored| stored.state.as_str() == state_param)
+                .unwrap_or(false)
+            {
+                (id.clone(), "linkedin")
+            } else if stored_mastodon
+                .map(|stored| stored.state.as_str() == state_param)
+                .unwrap_or(false)
+            {
+                (id.clone(), "mastodon")
+            } else if stored_x
+                .map(|stored| stored.state.as_str() == state_param)
+                .unwrap_or(false)
+            {
+                (id, "x")
             } else {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -648,14 +713,22 @@ pub async fn callback_get(
         }
     };
 
-    // Remove stored state
-    {
+    let stored_oauth = {
         let mut states = state.oauth_states.lock().await;
-        states.remove(&format!("{oauth_type}:{publisher_id}"));
-    }
+        match states.remove(&format!("{oauth_type}:{publisher_id}")) {
+            Some(stored) => stored,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Html(oauth_result_html(false, "No matching OAuth state found")),
+                )
+                    .into_response();
+            }
+        }
+    };
 
     // ── 2. Validate state ──
-    if state_param != stored_state {
+    if state_param != stored_oauth.state {
         return (
             StatusCode::UNAUTHORIZED,
             Html(oauth_result_html(false, "OAuth state mismatch")),
@@ -858,8 +931,19 @@ pub async fn callback_get(
                 }
             };
 
-            // X/Twitter — code_verifier is hardcoded to "challenge" in generate_auth_url
-            let code_verifier = "challenge".to_string();
+            let code_verifier = match stored_oauth.code_verifier.as_deref() {
+                Some(code_verifier) => code_verifier,
+                None => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Html(oauth_result_html(
+                            false,
+                            "Missing PKCE verifier for X OAuth flow",
+                        )),
+                    )
+                        .into_response();
+                }
+            };
 
             let (access_token, refresh_token, _) =
                 match x_pub.exchange_code_for_tokens(&code, &code_verifier).await {
@@ -1115,10 +1199,21 @@ mod tests {
     #[test]
     fn test_resolve_publisher_id_found() {
         let mut map = std::collections::HashMap::new();
-        map.insert("x:pub123".into(), ("state_abc".into(), Instant::now()));
+        map.insert(
+            "x:pub123".into(),
+            OAuthState {
+                state: "state_abc".into(),
+                created_at: Instant::now(),
+                code_verifier: Some("verifier".into()),
+            },
+        );
         map.insert(
             "linkedin:pub456".into(),
-            ("state_def".into(), Instant::now()),
+            OAuthState {
+                state: "state_def".into(),
+                created_at: Instant::now(),
+                code_verifier: None,
+            },
         );
         assert_eq!(
             resolve_publisher_id(&map, "state_abc"),
@@ -1139,7 +1234,14 @@ mod tests {
     #[test]
     fn test_resolve_publisher_id_no_match_for_state() {
         let mut map = std::collections::HashMap::new();
-        map.insert("x:pub1".into(), ("state1".into(), Instant::now()));
+        map.insert(
+            "x:pub1".into(),
+            OAuthState {
+                state: "state1".into(),
+                created_at: Instant::now(),
+                code_verifier: Some("verifier".into()),
+            },
+        );
         assert_eq!(resolve_publisher_id(&map, "state2"), None);
     }
 
