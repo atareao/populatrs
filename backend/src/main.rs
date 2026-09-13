@@ -194,160 +194,186 @@ async fn main() {
 
 /// Periodic feed scheduler loop.
 async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) {
-    // Initial delay before first check
+    // Retardo inicial
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
     loop {
-        let feeds = match db.list_feeds().await {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::error!("Failed to load feeds for scheduler: {}", e);
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                continue;
-            }
-        };
-
-        let enabled_feeds: Vec<_> = feeds.iter().filter(|f| f.enabled).collect();
-        tracing::info!(
-            "⏰ Scheduler: {} feeds enabled out of {}",
-            enabled_feeds.len(),
-            feeds.len()
-        );
-
-        let publishers = match db.list_publishers().await {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!("Failed to load publishers for scheduler: {}", e);
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                continue;
-            }
-        };
-
-        let mut publisher_manager = PublisherManager::new_with_db(None, Some(Arc::new(db.clone())));
-        for (id, (pub_config, enabled)) in &publishers {
-            if !enabled {
-                tracing::debug!("Skipping disabled publisher: {}", id);
-                continue;
-            }
-            if let Err(e) = publisher_manager.add_publisher(id.clone(), pub_config) {
-                tracing::error!("Failed to initialize publisher {}: {}", id, e);
-            }
-        }
-        let publisher_manager = Arc::new(publisher_manager);
-
-        let mut feed_manager = FeedManager::new();
-        let youtube_config = db.get_youtube_config().await.unwrap_or(None);
-        feed_manager.load_feeds_with_cache(
-            feeds.clone(),
-            youtube_config,
-            &std::collections::HashMap::new(),
-        );
-        let feed_manager = Arc::new(Mutex::new(feed_manager));
-
-        if let Err(e) = populatrs::run_feed_check(feed_manager, publisher_manager, &db, false).await
-        {
-            tracing::error!("Scheduler feed check error: {}", e);
-        }
-
-        // Update scheduler timing
-        {
-            let mut timing = sched_status.lock().await;
-            timing.last_run_at = Some(chrono::Utc::now().to_rfc3339());
-        }
-
-        // Clean up old logs based on retention setting
-        // IMPORTANT: delete from child table (publish_results) BEFORE parent (published_posts)
-        // to avoid foreign key constraint violations
-        let retention_days = db.get_log_retention().await.unwrap_or(30) as i64;
-        if let Err(e) = db.cleanup_old_publish_results(retention_days).await {
-            tracing::error!("Failed to cleanup old publish results: {}", e);
-        }
-        if let Err(e) = db.cleanup_old_posts(retention_days).await {
-            tracing::error!("Failed to cleanup old posts: {}", e);
-        }
-
-        // Read schedule and sleep until next cron tick
-        match db.get_schedule().await {
-            Ok(schedule) => {
-                // ponytail: cron crate uses 6-field (seconds, minutes, hours, dom, month, dow)
-                // normalize */N where N > field max to prevent "Minutes must be between 1 and 59" errors
-                let mut cron_expr = if schedule.cron_expression.split_whitespace().count() == 5 {
-                    format!("0 {}", schedule.cron_expression)
-                } else {
-                    schedule.cron_expression.clone()
-                };
-                let field_max = [59, 59, 23, 31, 12, 7];
-                let fields: Vec<&str> = cron_expr.split_whitespace().collect();
-                if fields.len() == 6 {
-                    let normalized: Vec<String> = fields
-                        .iter()
-                        .enumerate()
-                        .map(|(i, f)| {
-                            if let Some(rest) = f.strip_prefix("*/") {
-                                if let Ok(n) = rest.parse::<u32>() {
-                                    if n > field_max[i] {
-                                        return "0".to_string();
-                                    }
-                                }
-                            }
-                            f.to_string()
-                        })
-                        .collect();
-                    cron_expr = normalized.join(" ");
-                }
-                match cron::Schedule::from_str(&cron_expr) {
-                    Ok(cron_schedule) => {
-                        let tz_name = &schedule.timezone;
-                        let next_utc = match tz_name.parse::<chrono_tz::Tz>() {
-                            Ok(tz) => cron_schedule
-                                .upcoming(tz)
-                                .next()
-                                .map(|dt| dt.with_timezone(&chrono::Utc)),
-                            Err(_) => {
-                                tracing::warn!(
-                                    "Invalid timezone '{}' — falling back to UTC",
-                                    tz_name
-                                );
-                                cron_schedule.upcoming(chrono::Utc).next()
-                            }
-                        };
-                        if let Some(next) = next_utc {
-                            let now = chrono::Utc::now();
-                            {
-                                let mut timing = sched_status.lock().await;
-                                timing.next_run_at = Some(next.to_rfc3339());
-                            }
-                            let duration = (next - now)
-                                .to_std()
-                                .unwrap_or(std::time::Duration::from_secs(60));
-                            // Display next run in configured timezone for readability
-                            if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
-                                let local = next.with_timezone(&tz);
-                                tracing::info!("⏰ Next check at {} ({})", local, tz_name);
-                            } else {
-                                tracing::info!("⏰ Next check at {}", next);
-                            }
-                            tokio::time::sleep(duration).await;
-                        } else {
-                            tracing::warn!("No upcoming cron tick — sleeping 60s");
-                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Invalid cron expression '{}': {} — sleeping 60s",
-                            schedule.cron_expression,
-                            e
-                        );
-                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                    }
-                }
-            }
+        // 1. Leer programación desde la base de datos
+        let schedule = match db.get_schedule().await {
+            Ok(s) => s,
             Err(e) => {
                 tracing::error!("Failed to read schedule: {} — sleeping 60s", e);
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                continue;
             }
+        };
+
+        // 2. Normalizar cron expression
+        let mut cron_expr = if schedule.cron_expression.split_whitespace().count() == 5 {
+            format!("0 {}", schedule.cron_expression)
+        } else {
+            schedule.cron_expression.clone()
+        };
+
+        let field_max = [59, 59, 23, 31, 12, 7];
+        let fields: Vec<&str> = cron_expr.split_whitespace().collect();
+        if fields.len() == 6 {
+            let normalized: Vec<String> = fields
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    if let Some(rest) = f.strip_prefix("*/") {
+                        if let Ok(n) = rest.parse::<u32>() {
+                            if n > field_max[i] {
+                                return "0".to_string();
+                            }
+                        }
+                    }
+                    f.to_string()
+                })
+                .collect();
+            cron_expr = normalized.join(" ");
         }
+
+        let cron_schedule = match cron::Schedule::from_str(&cron_expr) {
+            Ok(cs) => cs,
+            Err(e) => {
+                tracing::error!(
+                    "Invalid cron expression '{}': {} — sleeping 60s",
+                    schedule.cron_expression,
+                    e
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                continue;
+            }
+        };
+
+        // 3. Obtener el instante actual FRESCO y calcular el siguiente disparo
+        let now = chrono::Utc::now();
+        let tz_name = &schedule.timezone;
+
+        let next_utc = match tz_name.parse::<chrono_tz::Tz>() {
+            Ok(tz) => {
+                let now_tz = now.with_timezone(&tz);
+                cron_schedule
+                    .after(&now_tz)
+                    .next()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+            }
+            Err(_) => {
+                tracing::warn!("Invalid timezone '{}' — falling back to UTC", tz_name);
+                cron_schedule.after(&now).next()
+            }
+        };
+
+        let next = match next_utc {
+            Some(n) => n,
+            None => {
+                tracing::warn!("No upcoming cron tick — sleeping 60s");
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                continue;
+            }
+        };
+
+        // Guardar la próxima ejecución en el estado compartido
+        {
+            let mut timing = sched_status.lock().await;
+            timing.next_run_at = Some(next.to_rfc3339());
+        }
+
+        // 4. Calcular el tiempo exacto de espera hasta la siguiente ejecución
+        let sleep_duration = match (next - chrono::Utc::now()).to_std() {
+            Ok(dur) => dur,
+            Err(_) => {
+                // Si el tiempo ya pasó (duración negativa), continuar de inmediato
+                std::time::Duration::from_secs(0)
+            }
+        };
+
+        if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
+            let local = next.with_timezone(&tz);
+            tracing::info!("⏰ Next check at {} ({})", local, tz_name);
+        } else {
+            tracing::info!("⏰ Next check at {}", next);
+        }
+
+        // Esperar hasta la hora fijada por el cron
+        tokio::time::sleep(sleep_duration).await;
+
+        // 5. EJECUTAR LA TAREA EN UN HILO INDEPENDIENTE
+        // Al usar tokio::spawn, el bucle del scheduler queda libre inmediatamente
+        // para calcular la siguiente iteración sin ser bloqueado por llamadas I/O.
+        let db_clone = db.clone();
+        let sched_status_clone = sched_status.clone();
+
+        tokio::spawn(async move {
+            tracing::info!("🚀 Running scheduled feed check...");
+
+            let feeds = match db_clone.list_feeds().await {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!("Failed to load feeds for scheduler: {}", e);
+                    return;
+                }
+            };
+
+            let enabled_feeds: Vec<_> = feeds.iter().filter(|f| f.enabled).collect();
+            tracing::info!(
+                "⏰ Scheduler: {} feeds enabled out of {}",
+                enabled_feeds.len(),
+                feeds.len()
+            );
+
+            let publishers = match db_clone.list_publishers().await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("Failed to load publishers for scheduler: {}", e);
+                    return;
+                }
+            };
+
+            let mut publisher_manager =
+                PublisherManager::new_with_db(None, Some(Arc::new(db_clone.clone())));
+            for (id, (pub_config, enabled)) in &publishers {
+                if !enabled {
+                    continue;
+                }
+                if let Err(e) = publisher_manager.add_publisher(id.clone(), pub_config) {
+                    tracing::error!("Failed to initialize publisher {}: {}", id, e);
+                }
+            }
+            let publisher_manager = Arc::new(publisher_manager);
+
+            let mut feed_manager = FeedManager::new();
+            let youtube_config = db_clone.get_youtube_config().await.unwrap_or(None);
+            feed_manager.load_feeds_with_cache(
+                feeds.clone(),
+                youtube_config,
+                &std::collections::HashMap::new(),
+            );
+            let feed_manager = Arc::new(Mutex::new(feed_manager));
+
+            if let Err(e) =
+                populatrs::run_feed_check(feed_manager, publisher_manager, &db_clone, false).await
+            {
+                tracing::error!("Scheduler feed check error: {}", e);
+            }
+
+            // Actualizar timestamp de última ejecución
+            {
+                let mut timing = sched_status_clone.lock().await;
+                timing.last_run_at = Some(chrono::Utc::now().to_rfc3339());
+            }
+
+            // Limpieza de logs
+            let retention_days = db_clone.get_log_retention().await.unwrap_or(30) as i64;
+            if let Err(e) = db_clone.cleanup_old_publish_results(retention_days).await {
+                tracing::error!("Failed to cleanup old publish results: {}", e);
+            }
+            if let Err(e) = db_clone.cleanup_old_posts(retention_days).await {
+                tracing::error!("Failed to cleanup old posts: {}", e);
+            }
+        });
     }
 }
 
