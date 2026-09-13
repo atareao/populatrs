@@ -48,10 +48,19 @@ pub struct JwksResponse {
     pub keys: Vec<Jwk>,
 }
 
-// ───── OIDC State ─────
+// ───── OIDC / OAuth State ─────
 
 pub type OidcStates =
     Arc<tokio::sync::Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>;
+
+#[derive(Debug, Clone)]
+pub struct OAuthState {
+    pub state: String,
+    pub created_at: std::time::Instant,
+    pub code_verifier: Option<String>,
+}
+
+pub type OAuthStates = Arc<tokio::sync::Mutex<std::collections::HashMap<String, OAuthState>>>;
 
 // ───── JWT Validator ─────
 
@@ -181,7 +190,7 @@ pub struct AppState {
     pub oidc_metadata: Option<OidcMetadata>,
     pub jwt_validator: Arc<JwtValidator>,
     pub oidc_states: OidcStates,
-    pub oauth_states: OidcStates,
+    pub oauth_states: OAuthStates,
     /// Broadcast sender for log entries (SSE to LogsPage).
     pub log_tx: broadcast::Sender<LogEntry>,
     pub publisher_manager: Arc<PublisherManager>,

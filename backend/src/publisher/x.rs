@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::Client;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use url::Url;
@@ -30,6 +31,17 @@ pub struct XPublisher {
 }
 
 impl XPublisher {
+    fn generate_pkce_pair() -> (String, String) {
+        let code_verifier = format!(
+            "{}{}",
+            Uuid::new_v4().to_string().replace('-', ""),
+            Uuid::new_v4().to_string().replace('-', "")
+        );
+        let code_challenge =
+            general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+        (code_verifier, code_challenge)
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -66,8 +78,7 @@ impl XPublisher {
     /// Genera la URL de autorización OAuth 2.0 PKCE para X/Twitter
     pub fn generate_auth_url(&self, state: Option<String>) -> (String, String) {
         let state = state.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let code_verifier = "challenge"; // En producción debería ser random
-        let code_challenge = code_verifier; // Para method=plain
+        let (code_verifier, code_challenge) = Self::generate_pkce_pair();
         let scope = "tweet.read tweet.write users.read offline.access";
 
         let mut url = Url::parse("https://twitter.com/i/oauth2/authorize").unwrap();
@@ -77,10 +88,10 @@ impl XPublisher {
             .append_pair("redirect_uri", &self.redirect_uri)
             .append_pair("scope", scope)
             .append_pair("state", &state)
-            .append_pair("code_challenge", code_challenge)
-            .append_pair("code_challenge_method", "plain");
+            .append_pair("code_challenge", &code_challenge)
+            .append_pair("code_challenge_method", "S256");
 
-        (url.to_string(), code_verifier.to_string())
+        (url.to_string(), code_verifier)
     }
 
     /// Intercambia el código de autorización por access_token y refresh_token
@@ -564,5 +575,57 @@ impl Publisher for XPublisher {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_publisher() -> XPublisher {
+        XPublisher::new(
+            "test-x".to_string(),
+            "test_client_id".to_string(),
+            "test_client_secret".to_string(),
+            None,
+            None,
+            Some("https://example.com/oauth/callback".to_string()),
+            "{{ title }}".to_string(),
+            Some("{{ url }}".to_string()),
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn test_generate_auth_url_uses_s256_pkce() {
+        let publisher = make_publisher();
+        let (url, code_verifier) = publisher.generate_auth_url(Some("test-state".to_string()));
+        let expected_challenge =
+            general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+
+        assert!((43..=128).contains(&code_verifier.len()));
+
+        let parsed = Url::parse(&url).unwrap();
+        let params: HashMap<_, _> = parsed.query_pairs().into_owned().collect();
+
+        assert_eq!(
+            params.get("response_type").map(String::as_str),
+            Some("code")
+        );
+        assert_eq!(
+            params.get("client_id").map(String::as_str),
+            Some("test_client_id")
+        );
+        assert_eq!(params.get("state").map(String::as_str), Some("test-state"));
+        assert_eq!(
+            params.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
+        assert_eq!(
+            params.get("code_challenge").map(String::as_str),
+            Some(expected_challenge.as_str())
+        );
     }
 }
