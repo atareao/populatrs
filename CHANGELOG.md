@@ -1,6 +1,10 @@
 # Changelog
 ## [0.4.16] - 2026-09-13
 
+### Miscellaneous Tasks
+
+- Release v0.4.16
+
 ### Styling
 
 - Format backend scheduler code
