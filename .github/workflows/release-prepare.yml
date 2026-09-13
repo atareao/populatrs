@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
   contents: write
 
 jobs:
@@ -61,12 +60,6 @@ jobs:
           git tag "v${V}"
           git push origin main
           git push origin "v${V}"
-      - name: Trigger Release workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          V="${{ steps.version.outputs.value }}"
-          gh workflow run Release --ref v${V}
       - name: Sync development with main
         env:
           GH_TOKEN: ${{ github.token }}
