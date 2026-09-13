@@ -1,10 +1,19 @@
 # Changelog
+## [0.4.16] - 2026-09-13
+
+### Styling
+
+- Format backend scheduler code
 ## [0.4.15] - 2026-09-07
 
 ### Bug Fixes
 
 - *(feed)* Use browser User-Agent to avoid CDN blocking
 - *(feed)* Use browser User-Agent to avoid CDN blocking
+
+### Miscellaneous Tasks
+
+- Release v0.4.15
 ## [0.4.14] - 2026-09-07
 
 ### Bug Fixes
