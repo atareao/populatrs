@@ -238,7 +238,11 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
         let cron_schedule = match cron::Schedule::from_str(&cron_expr) {
             Ok(cs) => cs,
             Err(e) => {
-                tracing::error!("Invalid cron expression '{}': {} — sleeping 60s", schedule.cron_expression, e);
+                tracing::error!(
+                    "Invalid cron expression '{}': {} — sleeping 60s",
+                    schedule.cron_expression,
+                    e
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 continue;
             }
@@ -247,11 +251,14 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
         // 3. Obtener el instante actual FRESCO y calcular el siguiente disparo
         let now = chrono::Utc::now();
         let tz_name = &schedule.timezone;
-        
+
         let next_utc = match tz_name.parse::<chrono_tz::Tz>() {
             Ok(tz) => {
                 let now_tz = now.with_timezone(&tz);
-                cron_schedule.after(&now_tz).next().map(|dt| dt.with_timezone(&chrono::Utc))
+                cron_schedule
+                    .after(&now_tz)
+                    .next()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
             }
             Err(_) => {
                 tracing::warn!("Invalid timezone '{}' — falling back to UTC", tz_name);
@@ -311,7 +318,11 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
             };
 
             let enabled_feeds: Vec<_> = feeds.iter().filter(|f| f.enabled).collect();
-            tracing::info!("⏰ Scheduler: {} feeds enabled out of {}", enabled_feeds.len(), feeds.len());
+            tracing::info!(
+                "⏰ Scheduler: {} feeds enabled out of {}",
+                enabled_feeds.len(),
+                feeds.len()
+            );
 
             let publishers = match db_clone.list_publishers().await {
                 Ok(p) => p,
@@ -321,7 +332,8 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
                 }
             };
 
-            let mut publisher_manager = PublisherManager::new_with_db(None, Some(Arc::new(db_clone.clone())));
+            let mut publisher_manager =
+                PublisherManager::new_with_db(None, Some(Arc::new(db_clone.clone())));
             for (id, (pub_config, enabled)) in &publishers {
                 if !enabled {
                     continue;
@@ -341,7 +353,9 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
             );
             let feed_manager = Arc::new(Mutex::new(feed_manager));
 
-            if let Err(e) = populatrs::run_feed_check(feed_manager, publisher_manager, &db_clone, false).await {
+            if let Err(e) =
+                populatrs::run_feed_check(feed_manager, publisher_manager, &db_clone, false).await
+            {
                 tracing::error!("Scheduler feed check error: {}", e);
             }
 
@@ -362,7 +376,6 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
         });
     }
 }
-
 
 /// Middleware helper: determines if a request path should bypass authentication.
 /// Public paths (auth endpoints, static assets, health, SPA fallback) are
