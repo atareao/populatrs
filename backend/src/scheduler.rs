@@ -95,8 +95,16 @@ pub async fn wait_for_scheduler_event(
             }
         }
         recv = schedule_change_rx.recv() => match recv {
-            Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) | Err(broadcast::error::RecvError::Closed) => {
+            Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
                 SchedulerWaitOutcome::RecheckSchedule
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                tokio::time::sleep(sleep_duration).await;
+                if Utc::now() >= next_run_at {
+                    SchedulerWaitOutcome::RunScheduledCheck
+                } else {
+                    SchedulerWaitOutcome::RecheckSchedule
+                }
             }
         }
     }
@@ -156,5 +164,22 @@ mod tests {
         .await;
 
         assert_eq!(outcome, SchedulerWaitOutcome::RecheckSchedule);
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_scheduler_event_does_not_busy_loop_when_channel_is_closed() {
+        let (tx, mut rx) = broadcast::channel(1);
+        drop(tx);
+
+        let started_at = std::time::Instant::now();
+        let outcome = wait_for_scheduler_event(
+            Utc::now() + chrono::Duration::milliseconds(100),
+            &mut rx,
+            Duration::from_millis(20),
+        )
+        .await;
+
+        assert_eq!(outcome, SchedulerWaitOutcome::RecheckSchedule);
+        assert!(started_at.elapsed() >= Duration::from_millis(20));
     }
 }
