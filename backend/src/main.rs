@@ -228,7 +228,12 @@ async fn feed_scheduler_loop(
             Ok(Some(next)) => next,
             Ok(None) => {
                 tracing::warn!("No upcoming cron tick — sleeping 60s");
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                let _ = wait_for_scheduler_event(
+                    chrono::Utc::now() + chrono::Duration::seconds(60),
+                    &mut schedule_change_rx,
+                    std::time::Duration::from_secs(60),
+                )
+                .await;
                 continue;
             }
             Err(e) => {
@@ -237,7 +242,12 @@ async fn feed_scheduler_loop(
                     schedule.cron_expression,
                     e
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                let _ = wait_for_scheduler_event(
+                    chrono::Utc::now() + chrono::Duration::seconds(60),
+                    &mut schedule_change_rx,
+                    std::time::Duration::from_secs(60),
+                )
+                .await;
                 continue;
             }
         };
