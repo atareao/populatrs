@@ -7,6 +7,7 @@ pub mod middleware;
 pub mod models;
 pub mod publisher;
 pub mod routes;
+pub mod scheduler;
 pub mod template;
 
 use anyhow::Result;
