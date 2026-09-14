@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use std::sync::Arc;
 
 use populatrs::auth::{AppState, JwtValidator, OidcMetadata};
@@ -8,6 +7,9 @@ use populatrs::embed::serve_embedded;
 use populatrs::middleware;
 use populatrs::models::{FeedManager, PublisherManager, SharedSchedulerStatus};
 use populatrs::routes;
+use populatrs::scheduler::{
+    next_cron_run_at, wait_for_scheduler_event, SchedulerWaitOutcome, MAX_SCHEDULE_RECHECK_INTERVAL,
+};
 
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
@@ -128,6 +130,7 @@ async fn main() {
     let publisher_manager = Arc::new(publisher_manager);
 
     let scheduler_status: SharedSchedulerStatus = Default::default();
+    let (schedule_change_tx, _) = tokio::sync::broadcast::channel(16);
 
     let app_state = Arc::new(AppState {
         config: config.clone(),
@@ -137,6 +140,7 @@ async fn main() {
         oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         log_tx,
+        schedule_change_tx: schedule_change_tx.clone(),
         publisher_manager: publisher_manager.clone(),
         scheduler_status: scheduler_status.clone(),
     });
@@ -144,8 +148,9 @@ async fn main() {
     // ───── Scheduler ─────
     let db_for_scheduler = db.clone();
     let sched_status = scheduler_status.clone();
+    let schedule_change_rx = schedule_change_tx.subscribe();
     tokio::spawn(async move {
-        feed_scheduler_loop(db_for_scheduler, sched_status).await;
+        feed_scheduler_loop(db_for_scheduler, sched_status, schedule_change_rx).await;
     });
 
     // ───── Build router ─────
@@ -193,7 +198,11 @@ async fn main() {
 }
 
 /// Periodic feed scheduler loop.
-async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) {
+async fn feed_scheduler_loop(
+    db: Database,
+    sched_status: SharedSchedulerStatus,
+    mut schedule_change_rx: tokio::sync::broadcast::Receiver<()>,
+) {
     // Retardo inicial
     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
@@ -208,69 +217,37 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
             }
         };
 
-        // 2. Normalizar cron expression
-        let mut cron_expr = if schedule.cron_expression.split_whitespace().count() == 5 {
-            format!("0 {}", schedule.cron_expression)
-        } else {
-            schedule.cron_expression.clone()
-        };
-
-        let field_max = [59, 59, 23, 31, 12, 7];
-        let fields: Vec<&str> = cron_expr.split_whitespace().collect();
-        if fields.len() == 6 {
-            let normalized: Vec<String> = fields
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    if let Some(rest) = f.strip_prefix("*/") {
-                        if let Ok(n) = rest.parse::<u32>() {
-                            if n > field_max[i] {
-                                return "0".to_string();
-                            }
-                        }
-                    }
-                    f.to_string()
-                })
-                .collect();
-            cron_expr = normalized.join(" ");
+        // 2. Obtener el instante actual FRESCO y calcular el siguiente disparo
+        let now = chrono::Utc::now();
+        let tz_name = &schedule.timezone;
+        if tz_name.parse::<chrono_tz::Tz>().is_err() {
+            tracing::warn!("Invalid timezone '{}' — falling back to UTC", tz_name);
         }
 
-        let cron_schedule = match cron::Schedule::from_str(&cron_expr) {
-            Ok(cs) => cs,
+        let next = match next_cron_run_at(&schedule, now) {
+            Ok(Some(next)) => next,
+            Ok(None) => {
+                tracing::warn!("No upcoming cron tick — sleeping 60s");
+                let _ = wait_for_scheduler_event(
+                    chrono::Utc::now() + chrono::Duration::seconds(60),
+                    &mut schedule_change_rx,
+                    std::time::Duration::from_secs(60),
+                )
+                .await;
+                continue;
+            }
             Err(e) => {
                 tracing::error!(
                     "Invalid cron expression '{}': {} — sleeping 60s",
                     schedule.cron_expression,
                     e
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                continue;
-            }
-        };
-
-        // 3. Obtener el instante actual FRESCO y calcular el siguiente disparo
-        let now = chrono::Utc::now();
-        let tz_name = &schedule.timezone;
-
-        let next_utc = match tz_name.parse::<chrono_tz::Tz>() {
-            Ok(tz) => {
-                let now_tz = now.with_timezone(&tz);
-                cron_schedule
-                    .after(&now_tz)
-                    .next()
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
-            }
-            Err(_) => {
-                tracing::warn!("Invalid timezone '{}' — falling back to UTC", tz_name);
-                cron_schedule.after(&now).next()
-            }
-        };
-
-        let next = match next_utc {
-            Some(n) => n,
-            None => {
-                tracing::warn!("No upcoming cron tick — sleeping 60s");
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                let _ = wait_for_scheduler_event(
+                    chrono::Utc::now() + chrono::Duration::seconds(60),
+                    &mut schedule_change_rx,
+                    std::time::Duration::from_secs(60),
+                )
+                .await;
                 continue;
             }
         };
@@ -281,15 +258,6 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
             timing.next_run_at = Some(next.to_rfc3339());
         }
 
-        // 4. Calcular el tiempo exacto de espera hasta la siguiente ejecución
-        let sleep_duration = match (next - chrono::Utc::now()).to_std() {
-            Ok(dur) => dur,
-            Err(_) => {
-                // Si el tiempo ya pasó (duración negativa), continuar de inmediato
-                std::time::Duration::from_secs(0)
-            }
-        };
-
         if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
             let local = next.with_timezone(&tz);
             tracing::info!("⏰ Next check at {} ({})", local, tz_name);
@@ -297,8 +265,15 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
             tracing::info!("⏰ Next check at {}", next);
         }
 
-        // Esperar hasta la hora fijada por el cron
-        tokio::time::sleep(sleep_duration).await;
+        match wait_for_scheduler_event(next, &mut schedule_change_rx, MAX_SCHEDULE_RECHECK_INTERVAL)
+            .await
+        {
+            SchedulerWaitOutcome::RecheckSchedule => {
+                tracing::debug!("🔄 Rechecking schedule configuration before next run");
+                continue;
+            }
+            SchedulerWaitOutcome::RunScheduledCheck => {}
+        }
 
         // 5. EJECUTAR LA TAREA EN UN HILO INDEPENDIENTE
         // Al usar tokio::spawn, el bucle del scheduler queda libre inmediatamente

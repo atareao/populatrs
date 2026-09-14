@@ -184,6 +184,8 @@ pub struct AppState {
     pub oauth_states: OidcStates,
     /// Broadcast sender for log entries (SSE to LogsPage).
     pub log_tx: broadcast::Sender<LogEntry>,
+    /// Broadcast sender to notify the scheduler when the cron config changes.
+    pub schedule_change_tx: broadcast::Sender<()>,
     pub publisher_manager: Arc<PublisherManager>,
     pub scheduler_status: SharedSchedulerStatus,
 }
@@ -193,6 +195,7 @@ impl AppState {
         config: Config,
         db: Database,
         log_tx: broadcast::Sender<LogEntry>,
+        schedule_change_tx: broadcast::Sender<()>,
         publisher_manager: Arc<PublisherManager>,
     ) -> Self {
         let jwt_validator = if config.oidc_configured() {
@@ -212,6 +215,7 @@ impl AppState {
             oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             log_tx,
+            schedule_change_tx,
             publisher_manager,
             scheduler_status: Default::default(),
         }
