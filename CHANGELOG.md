@@ -1,4 +1,14 @@
 # Changelog
+## [0.4.18] - 2026-09-14
+
+### Miscellaneous Tasks
+
+- *(deps-dev)* Bump vitest from 4.1.10 to 4.1.11 in /frontend
+## [0.4.17] - 2026-09-13
+
+### Miscellaneous Tasks
+
+- Release v0.4.17
 ## [0.4.16] - 2026-09-13
 
 ### Miscellaneous Tasks
