@@ -1,9 +1,15 @@
 # Changelog
+## [0.4.19] - 2026-09-19
+
+### Features
+
+- Implement PKCE (S256) for OIDC authorization flow
 ## [0.4.18] - 2026-09-14
 
 ### Miscellaneous Tasks
 
 - *(deps-dev)* Bump vitest from 4.1.10 to 4.1.11 in /frontend
+- Release v0.4.18
 ## [0.4.17] - 2026-09-13
 
 ### Miscellaneous Tasks
