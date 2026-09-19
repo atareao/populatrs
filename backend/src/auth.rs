@@ -51,7 +51,7 @@ pub struct JwksResponse {
 // ───── OIDC State ─────
 
 pub type OidcStates =
-    Arc<tokio::sync::Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>;
+    Arc<tokio::sync::Mutex<std::collections::HashMap<String, (String, String, std::time::Instant)>>>;
 
 // ───── JWT Validator ─────
 

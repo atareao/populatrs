@@ -86,7 +86,7 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let (auth_url, _code_verifier) = x_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("x:{id}"), (oauth_state, Instant::now()));
+        states.insert(format!("x:{id}"), (oauth_state, String::new(), Instant::now()));
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -95,7 +95,7 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let auth_url = li_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("linkedin:{id}"), (oauth_state, Instant::now()));
+        states.insert(format!("linkedin:{id}"), (oauth_state, String::new(), Instant::now()));
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -104,7 +104,7 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let auth_url = t_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("threads:{id}"), (oauth_state, Instant::now()));
+        states.insert(format!("threads:{id}"), (oauth_state, String::new(), Instant::now()));
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -134,7 +134,7 @@ pub async fn authorize(
                                     let oauth_state = uuid::Uuid::new_v4().to_string();
                                     let auth_url_str = new_m_pub.generate_auth_url(Some(oauth_state.clone()));
                                     let mut states = state.oauth_states.lock().await;
-                                    states.insert(format!("mastodon:{id}"), (oauth_state, Instant::now()));
+states.insert(format!("mastodon:{id}"), (oauth_state, String::new(), Instant::now()));
                                     return Json(json!({ "ok": true, "url": auth_url_str })).into_response();
                                 }
                             }
@@ -152,7 +152,7 @@ pub async fn authorize(
             let oauth_state = uuid::Uuid::new_v4().to_string();
             let auth_url_str = m_pub.generate_auth_url(Some(oauth_state.clone()));
             let mut states = state.oauth_states.lock().await;
-            states.insert(format!("mastodon:{id}"), (oauth_state, Instant::now()));
+            states.insert(format!("mastodon:{id}"), (oauth_state, String::new(), Instant::now()));
             Json(json!({ "ok": true, "url": auth_url_str })).into_response()
         })
         .await;
@@ -221,7 +221,7 @@ pub async fn callback(
             let mut states = state.oauth_states.lock().await;
             let stored = states.remove(&format!("x:{id}"));
             match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some((ref stored_state, _, _)) if stored_state == cb_state => { /* ok */ }
                 Some(_) => {
                     return (
                         StatusCode::UNAUTHORIZED,
@@ -281,7 +281,7 @@ pub async fn callback(
             let mut states = state.oauth_states.lock().await;
             let stored = states.remove(&format!("linkedin:{id}"));
             match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some((ref stored_state, _, _)) if stored_state == cb_state => { /* ok */ }
                 Some(_) => {
                     return (
                         StatusCode::UNAUTHORIZED,
@@ -357,7 +357,7 @@ pub async fn callback(
             let mut states = state.oauth_states.lock().await;
             let stored = states.remove(&format!("threads:{id}"));
             match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some((ref stored_state, _, _)) if stored_state == cb_state => { /* ok */ }
                 Some(_) => {
                     return (
                         StatusCode::UNAUTHORIZED,
@@ -434,7 +434,7 @@ pub async fn callback(
             let mut states = state.oauth_states.lock().await;
             let stored = states.remove(&format!("mastodon:{id}"));
             match stored {
-                Some((ref stored_state, _)) if stored_state == cb_state => { /* ok */ }
+                Some((ref stored_state, _, _)) if stored_state == cb_state => { /* ok */ }
                 Some(_) => {
                     return (
                         StatusCode::UNAUTHORIZED,
@@ -568,10 +568,10 @@ pub async fn status(
 /// Helper: find publisher_id from the stored OAuth state value.
 /// Iterates the oauth_states map looking for a matching state value.
 fn resolve_publisher_id(
-    states: &std::collections::HashMap<String, (String, Instant)>,
+    states: &std::collections::HashMap<String, (String, String, Instant)>,
     target_state: &str,
 ) -> Option<String> {
-    for (key, (stored_state, _)) in states {
+    for (key, (stored_state, _, _)) in states {
         if stored_state == target_state {
             // key format is "linkedin:{id}", "threads:{id}", or "x:{id}"
             if let Some(id) = key.split(':').nth(1) {
@@ -624,13 +624,13 @@ pub async fn callback_get(
             let stored_mastodon = states.get(&format!("mastodon:{id}"));
             let stored_x = states.get(&format!("x:{id}"));
 
-            if let Some((s, _)) = stored_threads.filter(|(s, _)| s == state_param) {
+            if let Some((s, _, _)) = stored_threads.filter(|(s, _, _)| s == state_param) {
                 (id.clone(), s.clone(), "threads")
-            } else if let Some((s, _)) = stored_linkedin.filter(|(s, _)| s == state_param) {
+            } else if let Some((s, _, _)) = stored_linkedin.filter(|(s, _, _)| s == state_param) {
                 (id.clone(), s.clone(), "linkedin")
-            } else if let Some((s, _)) = stored_mastodon.filter(|(s, _)| s == state_param) {
+            } else if let Some((s, _, _)) = stored_mastodon.filter(|(s, _, _)| s == state_param) {
                 (id.clone(), s.clone(), "mastodon")
-            } else if let Some((s, _)) = stored_x.filter(|(s, _)| s == state_param) {
+            } else if let Some((s, _, _)) = stored_x.filter(|(s, _, _)| s == state_param) {
                 (id, s.clone(), "x")
             } else {
                 return (
@@ -1115,10 +1115,10 @@ mod tests {
     #[test]
     fn test_resolve_publisher_id_found() {
         let mut map = std::collections::HashMap::new();
-        map.insert("x:pub123".into(), ("state_abc".into(), Instant::now()));
+        map.insert("x:pub123".into(), ("state_abc".into(), String::new(), Instant::now()));
         map.insert(
             "linkedin:pub456".into(),
-            ("state_def".into(), Instant::now()),
+            ("state_def".into(), String::new(), Instant::now()),
         );
         assert_eq!(
             resolve_publisher_id(&map, "state_abc"),
@@ -1139,7 +1139,7 @@ mod tests {
     #[test]
     fn test_resolve_publisher_id_no_match_for_state() {
         let mut map = std::collections::HashMap::new();
-        map.insert("x:pub1".into(), ("state1".into(), Instant::now()));
+        map.insert("x:pub1".into(), ("state1".into(), String::new(), Instant::now()));
         assert_eq!(resolve_publisher_id(&map, "state2"), None);
     }
 
