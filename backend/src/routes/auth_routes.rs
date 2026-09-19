@@ -7,7 +7,9 @@ use axum::{
     response::{Html, IntoResponse, Redirect},
     Json,
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::instrument;
 
 use crate::auth::{AppState, AuthUser};
@@ -49,6 +51,19 @@ struct UserInfoResponse {
     name: Option<String>,
 }
 
+/// Genera un code_verifier de 48 bytes aleatorios → 64 chars base64url sin padding.
+fn generate_code_verifier() -> String {
+    let mut bytes = [0u8; 48];
+    getrandom::fill(&mut bytes).expect("RNG failure");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// Calcula el code_challenge S256: SHA256(verifier) → base64url sin padding.
+fn compute_code_challenge(verifier: &str) -> String {
+    let hash = Sha256::digest(verifier.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)
+}
+
 #[instrument(skip(state))]
 pub async fn login(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     if let Some(issuer) = &state.config.oidc_issuer_url {
@@ -65,20 +80,23 @@ pub async fn login(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
         // Generate random state for CSRF protection (PocketID requires >= 8 chars)
         let oauth_state = uuid::Uuid::new_v4().to_string();
+        let code_verifier = generate_code_verifier();
+        let code_challenge = compute_code_challenge(&code_verifier);
         {
             let mut states = state.oidc_states.lock().await;
             states.insert(
                 "oidc:login".to_string(),
-                (oauth_state.clone(), Instant::now()),
+                (oauth_state.clone(), code_verifier, Instant::now()),
             );
         }
 
         let url = format!(
-            "{}/authorize?response_type=code&client_id={}&redirect_uri={}&scope=openid+profile+email&state={}",
+            "{}/authorize?response_type=code&client_id={}&redirect_uri={}&scope=openid+profile+email&state={}&code_challenge_method=S256&code_challenge={}",
             issuer.trim_end_matches('/'),
             client_id,
             redirect_uri,
             oauth_state,
+            code_challenge,
         );
         tracing::info!("redirecting to OIDC provider: {}", url);
         Redirect::to(&url).into_response()
@@ -116,10 +134,12 @@ pub async fn callback(
     }
 
     // Validate state parameter for CSRF protection
-    if let Some(ref cb_state) = query.state {
+    let code_verifier: Option<String> = if let Some(ref cb_state) = query.state {
         let stored_state = state.oidc_states.lock().await.remove("oidc:login");
         match stored_state {
-            Some((ref stored, _)) if stored == cb_state => { /* ok */ }
+            Some((ref stored, ref verifier, _)) if stored == cb_state => {
+                Some(verifier.clone())
+            }
             Some(_) => {
                 tracing::warn!("OIDC state mismatch: expected different value");
                 return (
@@ -142,12 +162,13 @@ pub async fn callback(
             }
             None => {
                 tracing::warn!("No stored OIDC state found — possible replay attack");
-                // Still allow the flow to continue for backwards compatibility
+                None
             }
         }
     } else {
         tracing::warn!("OIDC callback without state parameter");
-    }
+        None
+    };
 
     let code = match &query.code {
         Some(c) => c.clone(),
@@ -175,13 +196,16 @@ pub async fn callback(
         .unwrap_or("http://localhost:3044/auth/callback");
 
     let token_url = format!("{}/api/oidc/token", issuer.trim_end_matches('/'));
-    let params = [
+    let mut params = vec![
         ("grant_type", "authorization_code"),
         ("code", &code),
         ("redirect_uri", redirect_uri),
         ("client_id", client_id),
         ("client_secret", client_secret),
     ];
+    if let Some(ref cv) = code_verifier {
+        params.push(("code_verifier", cv));
+    }
 
     let client = reqwest::Client::new();
     let token_resp = match client.post(&token_url).form(&params).send().await {
@@ -566,10 +590,10 @@ mod tests {
     #[test]
     fn test_state_equality() {
         let cb_state = Some("stored_state_value".to_string());
-        let stored = Some(("stored_state_value".to_string(), std::time::Instant::now()));
-        // This mirrors: Some((ref stored, _)) if stored == cb_state
+        let stored = Some(("stored_state_value".to_string(), "verifier123".to_string(), std::time::Instant::now()));
+        // This mirrors: Some((ref stored, _, _)) if stored == cb_state
         match (&cb_state, &stored) {
-            (Some(cb), Some((ref stored_state, _))) if stored_state == cb => { /* match */ }
+            (Some(cb), Some((ref stored_state, _, _))) if stored_state == cb => { /* match */ }
             _ => panic!("state should match"),
         }
     }
@@ -577,9 +601,9 @@ mod tests {
     #[test]
     fn test_state_mismatch() {
         let cb_state = Some("wrong_state".to_string());
-        let stored = Some(("expected_state".to_string(), std::time::Instant::now()));
+        let stored = Some(("expected_state".to_string(), "verifier456".to_string(), std::time::Instant::now()));
         let is_mismatch = match (&cb_state, &stored) {
-            (Some(cb), Some((ref stored_state, _))) if stored_state == cb => false,
+            (Some(cb), Some((ref stored_state, _, _))) if stored_state == cb => false,
             _ => true,
         };
         assert!(is_mismatch);
@@ -628,5 +652,56 @@ mod tests {
             url,
             "https://pocketid.example.com/authorize?response_type=code&client_id=populatrs&redirect_uri=http://localhost:3044/auth/callback&scope=openid+profile+email&state=state-xyz"
         );
+    }
+
+    // ── PKCE helpers ──
+
+    #[test]
+    fn test_generate_code_verifier_length() {
+        let verifier = generate_code_verifier();
+        // 48 bytes → base64url sin padding = 64 caracteres
+        assert_eq!(verifier.len(), 64);
+        // Solo caracteres base64url (letras, dígitos, -, _)
+        assert!(verifier.chars().all(|c| {
+            c.is_ascii_alphanumeric() || c == '-' || c == '_'
+        }));
+        // Dos llamadas deberían producir valores distintos (aleatoriedad)
+        assert_ne!(verifier, generate_code_verifier());
+    }
+
+    #[test]
+    fn test_compute_code_challenge() {
+        let verifier = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let challenge = compute_code_challenge(verifier);
+        assert!(!challenge.is_empty());
+        assert!(challenge.chars().all(|c| {
+            c.is_ascii_alphanumeric() || c == '-' || c == '_'
+        }));
+        // Mismo verifier → mismo challenge (determinismo)
+        assert_eq!(
+            compute_code_challenge(verifier),
+            compute_code_challenge(verifier)
+        );
+    }
+
+    #[test]
+    fn test_login_url_includes_pkce_params() {
+        let issuer = "https://pocketid.example.com";
+        let client_id = "populatrs";
+        let redirect_uri = "http://localhost:3044/auth/callback";
+        let oauth_state = "test-state-123";
+        let code_challenge = "test-challenge-value";
+
+        let url = format!(
+            "{}/authorize?response_type=code&client_id={}&redirect_uri={}&scope=openid+profile+email&state={}&code_challenge_method=S256&code_challenge={}",
+            issuer.trim_end_matches('/'),
+            client_id,
+            redirect_uri,
+            oauth_state,
+            code_challenge,
+        );
+        assert!(url.contains("code_challenge_method=S256"));
+        assert!(url.contains("code_challenge=test-challenge-value"));
+        assert!(url.starts_with("https://pocketid.example.com/authorize?"));
     }
 }
