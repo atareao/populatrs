@@ -45,6 +45,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 # OIDC / Auth
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 base64 = "0.22"
+getrandom = "0.3"
 cookie = "0.18"
 
 # Database
