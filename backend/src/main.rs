@@ -365,13 +365,10 @@ async fn feed_scheduler_loop(db: Database, sched_status: SharedSchedulerStatus) 
                 timing.last_run_at = Some(chrono::Utc::now().to_rfc3339());
             }
 
-            // Limpieza de logs
+            // Limpieza de logs (publish_results only — published_posts dedup is permanent)
             let retention_days = db_clone.get_log_retention().await.unwrap_or(30) as i64;
             if let Err(e) = db_clone.cleanup_old_publish_results(retention_days).await {
                 tracing::error!("Failed to cleanup old publish results: {}", e);
-            }
-            if let Err(e) = db_clone.cleanup_old_posts(retention_days).await {
-                tracing::error!("Failed to cleanup old posts: {}", e);
             }
         });
     }
