@@ -19,21 +19,17 @@ async fn main() {
 
     let config = Config::load();
 
-    // ───── Log broadcast for SSE LogsPage ─────
-    let (log_tx, log_layer) = populatrs::routes::logs::log_layer();
+    // Initialize tracing
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
 
-    // Initialize tracing: SSE broadcast + env filter + fmt output
     if config.log_format == "json" {
         tracing_subscriber::registry()
-            .with(log_layer)
             .with(env_filter)
             .with(tracing_subscriber::fmt::layer().json())
             .init();
     } else {
         tracing_subscriber::registry()
-            .with(log_layer)
             .with(env_filter)
             .with(
                 tracing_subscriber::fmt::layer()
@@ -136,7 +132,6 @@ async fn main() {
         jwt_validator: jwt_validator.clone(),
         oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        log_tx,
         publisher_manager: publisher_manager.clone(),
         scheduler_status: scheduler_status.clone(),
     });
