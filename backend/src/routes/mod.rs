@@ -94,7 +94,6 @@ pub fn api_routes() -> Router<Arc<AppState>> {
             routing::get(youtube::get).put(youtube::update),
         )
         .route("/api/status", routing::get(status::dashboard))
-        .route("/api/logs/stream", routing::get(logs::stream))
         .route("/api/logs/history", routing::get(logs::history))
         .route("/api/logs/republish", routing::post(logs::republish))
         .route(
