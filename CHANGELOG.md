@@ -1,9 +1,32 @@
 # Changelog
+## [0.4.20] - 2026-09-22
+
+### Documentation
+
+- Add OPENSPEC SDD + TDD workflow instructions
+- Add OpenSpec specs and archive for dedup-table
+
+### Features
+
+- Dedup-table — permanent dedup records, fix pagination bug
+- Dedup-table — permanent dedup records, fix pagination bug
+
+### Other
+
+- V0.5.0
+
+### Styling
+
+- Apply cargo fmt formatting
 ## [0.4.19] - 2026-09-19
 
 ### Features
 
 - Implement PKCE (S256) for OIDC authorization flow
+
+### Miscellaneous Tasks
+
+- Release v0.4.19
 ## [0.4.18] - 2026-09-14
 
 ### Miscellaneous Tasks
