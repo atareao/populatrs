@@ -2,24 +2,13 @@ use std::sync::Arc;
 
 use base64::Engine;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, RwLock};
+use serde::Deserialize;
+use tokio::sync::RwLock;
 
 use crate::config::Config;
 use crate::db::Database;
 use crate::models::PublisherManager;
 use crate::models::SharedSchedulerStatus;
-
-// ───── Log Entry (broadcast via SSE) ─────
-
-/// A single log entry sent via SSE to the LogsPage.
-#[derive(Debug, Clone, Serialize)]
-pub struct LogEntry {
-    pub timestamp: String,
-    pub level: String,
-    pub message: String,
-    pub target: String,
-}
 
 // ───── OIDC Discovery ─────
 
@@ -183,19 +172,12 @@ pub struct AppState {
     pub jwt_validator: Arc<JwtValidator>,
     pub oidc_states: OidcStates,
     pub oauth_states: OidcStates,
-    /// Broadcast sender for log entries (SSE to LogsPage).
-    pub log_tx: broadcast::Sender<LogEntry>,
     pub publisher_manager: Arc<PublisherManager>,
     pub scheduler_status: SharedSchedulerStatus,
 }
 
 impl AppState {
-    pub fn new(
-        config: Config,
-        db: Database,
-        log_tx: broadcast::Sender<LogEntry>,
-        publisher_manager: Arc<PublisherManager>,
-    ) -> Self {
+    pub fn new(config: Config, db: Database, publisher_manager: Arc<PublisherManager>) -> Self {
         let jwt_validator = if config.oidc_configured() {
             JwtValidator::new(
                 config.oidc_issuer_url.as_deref().unwrap_or(""),
@@ -212,7 +194,6 @@ impl AppState {
             jwt_validator: Arc::new(jwt_validator),
             oidc_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             oauth_states: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-            log_tx,
             publisher_manager,
             scheduler_status: Default::default(),
         }
