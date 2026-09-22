@@ -699,10 +699,12 @@ impl Database {
             .prepare(
                 "SELECT pp.guid, pp.feed_id, pp.title, pp.url, pp.published_at,
                         pr.publisher_id, pr.success, pr.message
-                 FROM published_posts pp
+                 FROM (SELECT guid, feed_id, title, url, published_at
+                       FROM published_posts
+                       ORDER BY published_at DESC
+                       LIMIT ?1 OFFSET ?2) pp
                  LEFT JOIN publish_results pr ON pp.guid = pr.guid AND pp.feed_id = pr.feed_id
-                 ORDER BY pp.published_at DESC
-                 LIMIT ?1 OFFSET ?2",
+                 ORDER BY pp.published_at DESC",
             )
             .context("Failed to prepare list_feed_logs")?;
 
