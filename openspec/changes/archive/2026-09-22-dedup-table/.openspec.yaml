@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-22
+goal: Prevenir que posts antiguos se vuelvan a publicar tras el cleanup
+  automático del histórico
