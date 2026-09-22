@@ -202,7 +202,7 @@ export default function LogsPage() {
 
       {data && (
         <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-          {data.total} entries total — automatically cleaned up after {data.retention_days} days
+          {data.total} entries total — publish results older than {data.retention_days} days are auto-cleaned (dedup records are permanent)
         </Text>
       )}
 

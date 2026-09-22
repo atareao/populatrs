@@ -137,9 +137,7 @@ pub async fn callback(
     let code_verifier: Option<String> = if let Some(ref cb_state) = query.state {
         let stored_state = state.oidc_states.lock().await.remove("oidc:login");
         match stored_state {
-            Some((ref stored, ref verifier, _)) if stored == cb_state => {
-                Some(verifier.clone())
-            }
+            Some((ref stored, ref verifier, _)) if stored == cb_state => Some(verifier.clone()),
             Some(_) => {
                 tracing::warn!("OIDC state mismatch: expected different value");
                 return (
@@ -590,7 +588,11 @@ mod tests {
     #[test]
     fn test_state_equality() {
         let cb_state = Some("stored_state_value".to_string());
-        let stored = Some(("stored_state_value".to_string(), "verifier123".to_string(), std::time::Instant::now()));
+        let stored = Some((
+            "stored_state_value".to_string(),
+            "verifier123".to_string(),
+            std::time::Instant::now(),
+        ));
         // This mirrors: Some((ref stored, _, _)) if stored == cb_state
         match (&cb_state, &stored) {
             (Some(cb), Some((ref stored_state, _, _))) if stored_state == cb => { /* match */ }
@@ -601,7 +603,11 @@ mod tests {
     #[test]
     fn test_state_mismatch() {
         let cb_state = Some("wrong_state".to_string());
-        let stored = Some(("expected_state".to_string(), "verifier456".to_string(), std::time::Instant::now()));
+        let stored = Some((
+            "expected_state".to_string(),
+            "verifier456".to_string(),
+            std::time::Instant::now(),
+        ));
         let is_mismatch = match (&cb_state, &stored) {
             (Some(cb), Some((ref stored_state, _, _))) if stored_state == cb => false,
             _ => true,
@@ -662,9 +668,9 @@ mod tests {
         // 48 bytes → base64url sin padding = 64 caracteres
         assert_eq!(verifier.len(), 64);
         // Solo caracteres base64url (letras, dígitos, -, _)
-        assert!(verifier.chars().all(|c| {
-            c.is_ascii_alphanumeric() || c == '-' || c == '_'
-        }));
+        assert!(verifier
+            .chars()
+            .all(|c| { c.is_ascii_alphanumeric() || c == '-' || c == '_' }));
         // Dos llamadas deberían producir valores distintos (aleatoriedad)
         assert_ne!(verifier, generate_code_verifier());
     }
@@ -674,9 +680,9 @@ mod tests {
         let verifier = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         let challenge = compute_code_challenge(verifier);
         assert!(!challenge.is_empty());
-        assert!(challenge.chars().all(|c| {
-            c.is_ascii_alphanumeric() || c == '-' || c == '_'
-        }));
+        assert!(challenge
+            .chars()
+            .all(|c| { c.is_ascii_alphanumeric() || c == '-' || c == '_' }));
         // Mismo verifier → mismo challenge (determinismo)
         assert_eq!(
             compute_code_challenge(verifier),

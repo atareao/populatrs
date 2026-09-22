@@ -86,7 +86,10 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let (auth_url, _code_verifier) = x_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("x:{id}"), (oauth_state, String::new(), Instant::now()));
+        states.insert(
+            format!("x:{id}"),
+            (oauth_state, String::new(), Instant::now()),
+        );
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -95,7 +98,10 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let auth_url = li_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("linkedin:{id}"), (oauth_state, String::new(), Instant::now()));
+        states.insert(
+            format!("linkedin:{id}"),
+            (oauth_state, String::new(), Instant::now()),
+        );
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -104,7 +110,10 @@ pub async fn authorize(
         let oauth_state = uuid::Uuid::new_v4().to_string();
         let auth_url = t_pub.generate_auth_url(Some(oauth_state.clone()));
         let mut states = state.oauth_states.lock().await;
-        states.insert(format!("threads:{id}"), (oauth_state, String::new(), Instant::now()));
+        states.insert(
+            format!("threads:{id}"),
+            (oauth_state, String::new(), Instant::now()),
+        );
         return Json(json!({ "ok": true, "url": auth_url })).into_response();
     }
 
@@ -1115,7 +1124,10 @@ mod tests {
     #[test]
     fn test_resolve_publisher_id_found() {
         let mut map = std::collections::HashMap::new();
-        map.insert("x:pub123".into(), ("state_abc".into(), String::new(), Instant::now()));
+        map.insert(
+            "x:pub123".into(),
+            ("state_abc".into(), String::new(), Instant::now()),
+        );
         map.insert(
             "linkedin:pub456".into(),
             ("state_def".into(), String::new(), Instant::now()),
@@ -1139,7 +1151,10 @@ mod tests {
     #[test]
     fn test_resolve_publisher_id_no_match_for_state() {
         let mut map = std::collections::HashMap::new();
-        map.insert("x:pub1".into(), ("state1".into(), String::new(), Instant::now()));
+        map.insert(
+            "x:pub1".into(),
+            ("state1".into(), String::new(), Instant::now()),
+        );
         assert_eq!(resolve_publisher_id(&map, "state2"), None);
     }
 
