@@ -13,8 +13,11 @@ import {
   fetchStorage,
   updateStorage,
   fetchStatus,
+  logout,
+  SessionExpiredError,
   type FeedConfig,
 } from "../api/http";
+import { clearToken } from "../store/auth";
 
 // Mock sessionStorage
 beforeEach(() => {
@@ -36,8 +39,44 @@ function mockFetchError(message: string) {
   globalThis.fetch = vi.fn().mockRejectedValue(new Error(message));
 }
 
+// URL-aware mock: lets a test return different responses per endpoint.
+function mockFetchByUrl(
+  responses: Record<string, { status: number; body: unknown }>,
+) {
+  globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+    const entry = responses[url] ?? { status: 500, body: "unexpected url" };
+    return Promise.resolve({
+      ok: entry.status >= 200 && entry.status < 300,
+      status: entry.status,
+      json: () => Promise.resolve(entry.body),
+      text: () =>
+        Promise.resolve(
+          typeof entry.body === "string" ? entry.body : JSON.stringify(entry.body),
+        ),
+    });
+  });
+}
+
 function setToken(token: string) {
   sessionStorage.setItem("populatrs_token", token);
+}
+
+// A promise whose resolution is controlled by the test, so a silent refresh
+// can be held "in flight" while the test clears the session.
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+// Flush pending microtasks and timers so the 401 interceptor has started the
+// refresh before the test proceeds.
+function flushAsync(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("api/http", () => {
@@ -56,9 +95,214 @@ describe("api/http", () => {
 
     it("throws on non-ok response", async () => {
       setToken("t");
+      mockFetch(500, "Server Error");
+
+      await expect(fetchMe()).rejects.toThrow("HTTP 500: Server Error");
+    });
+
+    it("throws 'Session expired' and clears the token when refresh fails on 401", async () => {
+      setToken("t");
+      // Both the original request and the refresh attempt return 401.
       mockFetch(401, "Unauthorized");
 
-      await expect(fetchMe()).rejects.toThrow("HTTP 401: Unauthorized");
+      await expect(fetchMe()).rejects.toThrow("Session expired");
+      expect(sessionStorage.getItem("populatrs_token")).toBeNull();
+    });
+
+    it("throws a SessionExpiredError when refresh fails on 401", async () => {
+      setToken("t");
+      mockFetch(401, "Unauthorized");
+
+      const err = await fetchMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SessionExpiredError);
+    });
+
+    it("throws a plain Error (not SessionExpiredError) on a network failure", async () => {
+      setToken("t");
+      mockFetchError("Network failure");
+
+      const err = await fetchMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(SessionExpiredError);
+    });
+
+    it("keeps the token and throws a plain Error when refresh returns 500", async () => {
+      setToken("t");
+      mockFetchByUrl({
+        "/api/me": { status: 401, body: "Unauthorized" },
+        "/auth/refresh": { status: 500, body: "Server Error" },
+      });
+
+      const err = await fetchMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(SessionExpiredError);
+      expect(sessionStorage.getItem("populatrs_token")).toBe("t");
+    });
+
+    it("keeps the token when the refresh request fails with a network error", async () => {
+      setToken("t");
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url === "/auth/refresh") {
+          return Promise.reject(new Error("Network failure"));
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve("Unauthorized"),
+          text: () => Promise.resolve("Unauthorized"),
+        });
+      });
+
+      const err = await fetchMe().catch((e: unknown) => e);
+      expect(err).not.toBeInstanceOf(SessionExpiredError);
+      expect(sessionStorage.getItem("populatrs_token")).toBe("t");
+    });
+
+    it("clears the token and throws SessionExpiredError when refresh returns 401", async () => {
+      setToken("t");
+      mockFetchByUrl({
+        "/api/me": { status: 401, body: "Unauthorized" },
+        "/auth/refresh": { status: 401, body: "Unauthorized" },
+      });
+
+      const err = await fetchMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SessionExpiredError);
+      expect(sessionStorage.getItem("populatrs_token")).toBeNull();
+    });
+
+    it("keeps the refreshed token and throws a plain Error when the retried request returns 500", async () => {
+      setToken("t");
+      let meCalls = 0;
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url === "/auth/refresh") {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ access_token: "new-token" }),
+            text: () => Promise.resolve(""),
+          });
+        }
+        meCalls += 1;
+        const status = meCalls === 1 ? 401 : 500;
+        return Promise.resolve({
+          ok: false,
+          status,
+          json: () => Promise.resolve("err"),
+          text: () => Promise.resolve("Server Error"),
+        });
+      });
+
+      const err = await fetchMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(SessionExpiredError);
+      expect(sessionStorage.getItem("populatrs_token")).toBe("new-token");
+    });
+
+    it("clears the token and throws SessionExpiredError when the retried request returns 401", async () => {
+      setToken("t");
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url === "/auth/refresh") {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ access_token: "new-token" }),
+            text: () => Promise.resolve(""),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          json: () => Promise.resolve("Unauthorized"),
+          text: () => Promise.resolve("Unauthorized"),
+        });
+      });
+
+      const err = await fetchMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SessionExpiredError);
+      expect(sessionStorage.getItem("populatrs_token")).toBeNull();
+    });
+  });
+
+  describe("silent refresh vs. logout race", () => {
+    it("discards a silent refresh that resolves after the session is cleared", async () => {
+      setToken("t");
+      const refresh = deferred<{ access_token: string }>();
+      let meCalls = 0;
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url === "/auth/refresh") {
+          return refresh.promise.then((body) => ({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(body),
+            text: () => Promise.resolve(""),
+          }));
+        }
+        meCalls += 1;
+        if (meCalls === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: () => Promise.resolve("Unauthorized"),
+            text: () => Promise.resolve("Unauthorized"),
+          });
+        }
+        // The retry would succeed if the resurrected token were stored.
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ sub: "u", email: "e", name: "n" }),
+          text: () => Promise.resolve(""),
+        });
+      });
+
+      const pending = fetchMe().catch((e: unknown) => e);
+      // Let the 401 interceptor start the refresh, then log out mid-flight.
+      await flushAsync();
+      clearToken();
+      refresh.resolve({ access_token: "resurrected-token" });
+
+      const err = await pending;
+      expect(err).toBeInstanceOf(SessionExpiredError);
+      expect(sessionStorage.getItem("populatrs_token")).toBeNull();
+    });
+
+    it("stores the new token when the silent refresh resolves before the session is cleared", async () => {
+      setToken("t");
+      const refresh = deferred<{ access_token: string }>();
+      let meCalls = 0;
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url === "/auth/refresh") {
+          return refresh.promise.then((body) => ({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(body),
+            text: () => Promise.resolve(""),
+          }));
+        }
+        meCalls += 1;
+        if (meCalls === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: () => Promise.resolve("Unauthorized"),
+            text: () => Promise.resolve("Unauthorized"),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ sub: "u", email: "e", name: "n" }),
+          text: () => Promise.resolve(""),
+        });
+      });
+
+      const pending = fetchMe();
+      await flushAsync();
+      refresh.resolve({ access_token: "new-token" });
+
+      const user = await pending;
+      expect(user.email).toBe("e");
+      expect(sessionStorage.getItem("populatrs_token")).toBe("new-token");
     });
   });
 
@@ -240,6 +484,42 @@ describe("api/http", () => {
 
       const headers = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].headers;
       expect(headers.Authorization).toBeUndefined();
+    });
+  });
+
+  describe("logout", () => {
+    it("POSTs to /auth/logout with the raw bearer token and returns end_session_url", async () => {
+      setToken("raw-token");
+      mockFetch(200, { end_session_url: "https://idp.example.com/logout" });
+
+      const result = await logout();
+
+      expect(result.end_session_url).toBe("https://idp.example.com/logout");
+      expect(fetch).toHaveBeenCalledWith(
+        "/auth/logout",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer raw-token",
+          }),
+        }),
+      );
+    });
+
+    it("returns null end_session_url when the server omits it", async () => {
+      setToken("raw-token");
+      mockFetch(200, {});
+
+      const result = await logout();
+      expect(result.end_session_url).toBeNull();
+    });
+
+    it("tolerates failure and returns null end_session_url", async () => {
+      setToken("raw-token");
+      mockFetchError("Network failure");
+
+      const result = await logout();
+      expect(result.end_session_url).toBeNull();
     });
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Layout, Button, Typography, Menu } from "antd";
 import {
   DashboardOutlined,
@@ -12,6 +12,8 @@ import {
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router";
 import { clearToken } from "../store/auth";
+import { logout } from "../api/http";
+import { safeRedirectTarget } from "../utils/redirect";
 
 const { Content, Sider } = Layout;
 const { Text } = Typography;
@@ -28,10 +30,27 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  // Ref (not just state) so a second click within the same synchronous tick is
+  // blocked before React re-renders and disables the button.
+  const loggingOutRef = useRef(false);
 
-  const handleLogout = () => {
-    clearToken();
-    navigate("/login", { replace: true });
+  const handleLogout = async () => {
+    if (loggingOutRef.current) return;
+    loggingOutRef.current = true;
+    setLoggingOut(true);
+
+    try {
+      const result = await logout();
+      clearToken();
+      // Full navigation (not react-router) so the provider redirect works.
+      window.location.href = safeRedirectTarget(result.end_session_url);
+    } finally {
+      // Reset so the button is not permanently disabled if navigation does
+      // not occur (e.g. the redirect is blocked).
+      loggingOutRef.current = false;
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -54,6 +73,7 @@ export default function AppLayout() {
           {!collapsed && <Text className="logo-text" style={{ fontSize: 20, fontWeight: 700 }}>populatrs</Text>}
           <Button
             type="text"
+            aria-label={collapsed ? "Expandir menú" : "Contraer menú"}
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(!collapsed)}
             style={{ color: "#9494a8", border: "none", padding: 4, minWidth: "auto", height: "auto" }}
@@ -70,8 +90,10 @@ export default function AppLayout() {
         <div style={{ position: "absolute", bottom: 16, left: 0, right: 0, padding: "0 16px" }}>
           <Button
             type="text"
+            aria-label="Cerrar sesión"
             icon={<LogoutOutlined />}
             onClick={handleLogout}
+            disabled={loggingOut}
             style={{ color: "#9494a8", width: "100%", justifyContent: "flex-start" }}
           >
             {!collapsed && "Cerrar sesión"}
