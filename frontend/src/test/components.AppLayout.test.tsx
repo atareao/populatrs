@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { ConfigProvider } from "antd";
 import AppLayout from "../components/AppLayout";
@@ -31,6 +31,8 @@ function renderLayout(initialEntries = ["/"]) {
 describe("AppLayout", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it("renders the logo text", () => {
@@ -52,9 +54,15 @@ describe("AppLayout", () => {
     expect(screen.getByText("Cerrar sesión")).toBeInTheDocument();
   });
 
-  it("renders the collapse button", () => {
+  it("renders the collapse button with an accessible name", () => {
     renderLayout();
-    expect(screen.getByRole("button", { name: "menu-fold" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Contraer menú" })).toBeInTheDocument();
+  });
+
+  it("names the logout button when the sidebar is collapsed", () => {
+    renderLayout();
+    fireEvent.click(screen.getByRole("button", { name: "Contraer menú" }));
+    expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeInTheDocument();
   });
 
   it("renders the Outlet content", () => {
@@ -66,5 +74,135 @@ describe("AppLayout", () => {
     renderLayout(["/feeds"]);
     const menuItems = screen.getAllByText("Feeds");
     expect(menuItems.length).toBeGreaterThan(0);
+  });
+
+  describe("logout", () => {
+    const originalLocation = window.location;
+
+    afterEach(() => {
+      Object.defineProperty(window, "location", {
+        writable: true,
+        configurable: true,
+        value: originalLocation,
+      });
+    });
+
+    function mockLogoutFetch(endSessionUrl: string | null) {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ end_session_url: endSessionUrl }),
+        text: () => Promise.resolve(""),
+      });
+      globalThis.fetch = fetchMock;
+      return fetchMock;
+    }
+
+    function stubLocation() {
+      Object.defineProperty(window, "location", {
+        writable: true,
+        configurable: true,
+        value: { href: "" },
+      });
+    }
+
+    it("calls POST /auth/logout, clears tokens, and navigates to /login", async () => {
+      sessionStorage.setItem("populatrs_token", "raw-token");
+      localStorage.setItem("populatrs_token", "raw-token");
+      const fetchMock = mockLogoutFetch(null);
+      stubLocation();
+
+      renderLayout();
+      fireEvent.click(screen.getByText("Cerrar sesión"));
+
+      await waitFor(() => expect(window.location.href).toBe("/login"));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/auth/logout",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer raw-token",
+          }),
+        }),
+      );
+      expect(sessionStorage.getItem("populatrs_token")).toBeNull();
+      expect(localStorage.getItem("populatrs_token")).toBeNull();
+    });
+
+    it("navigates to the provider end_session_url when present", async () => {
+      sessionStorage.setItem("populatrs_token", "raw-token");
+      mockLogoutFetch("https://idp.example.com/logout");
+      stubLocation();
+
+      renderLayout();
+      fireEvent.click(screen.getByText("Cerrar sesión"));
+
+      await waitFor(() =>
+        expect(window.location.href).toBe("https://idp.example.com/logout"),
+      );
+    });
+
+    it("falls back to /login for a javascript: end_session_url", async () => {
+      sessionStorage.setItem("populatrs_token", "raw-token");
+      mockLogoutFetch("javascript:alert(1)");
+      stubLocation();
+
+      renderLayout();
+      fireEvent.click(screen.getByText("Cerrar sesión"));
+
+      await waitFor(() => expect(window.location.href).toBe("/login"));
+    });
+
+    it("falls back to /login for an empty end_session_url", async () => {
+      sessionStorage.setItem("populatrs_token", "raw-token");
+      mockLogoutFetch("");
+      stubLocation();
+
+      renderLayout();
+      fireEvent.click(screen.getByText("Cerrar sesión"));
+
+      await waitFor(() => expect(window.location.href).toBe("/login"));
+    });
+
+    it("does not call logout twice on a double-click", async () => {
+      sessionStorage.setItem("populatrs_token", "raw-token");
+      let resolveFetch: ((value: unknown) => void) | undefined;
+      const fetchMock = vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+      globalThis.fetch = fetchMock;
+      stubLocation();
+
+      renderLayout();
+      const btn = screen.getByRole("button", { name: "Cerrar sesión" });
+      fireEvent.click(btn);
+      fireEvent.click(btn);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      resolveFetch?.({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ end_session_url: null }),
+        text: () => Promise.resolve(""),
+      });
+      await waitFor(() => expect(window.location.href).toBe("/login"));
+    });
+
+    it("re-enables the logout button after logout completes", async () => {
+      sessionStorage.setItem("populatrs_token", "raw-token");
+      mockLogoutFetch(null);
+      stubLocation();
+
+      renderLayout();
+      const btn = screen.getByRole("button", { name: "Cerrar sesión" });
+      fireEvent.click(btn);
+
+      await waitFor(() => expect(window.location.href).toBe("/login"));
+      await waitFor(() => expect(btn).not.toBeDisabled());
+    });
   });
 });

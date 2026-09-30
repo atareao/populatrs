@@ -973,18 +973,69 @@ impl Database {
         Ok(())
     }
 
+    /// Atomically rotate a stored refresh token only when it still matches
+    /// `expected_token` (compare-and-swap).
+    ///
+    /// Returns `true` when a row was updated, `false` when no row matched — for
+    /// example because logout deleted it or a concurrent refresh rotated it.
+    pub async fn save_refresh_token_if_current(
+        &self,
+        user_id: &str,
+        expected_token: &str,
+        new_token: &str,
+        _expires_in: u64,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        // Refresh tokens in PocketID live 30 days; use that as the stored expiry
+        let expires_at = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+        let rows = conn
+            .execute(
+                "UPDATE refresh_tokens SET refresh_token = ?1, expires_at = ?2 \
+                 WHERE user_id = ?3 AND refresh_token = ?4",
+                params![new_token, expires_at, user_id, expected_token],
+            )
+            .context("Failed to rotate refresh token")?;
+        Ok(rows > 0)
+    }
+
     /// Get the stored refresh token for a user.
+    ///
+    /// Returns `None` when no token is stored, when the stored token has passed
+    /// its `expires_at`, or when `expires_at` cannot be parsed. Expired rows are
+    /// deleted from storage as a side effect.
     pub async fn get_refresh_token(&self, user_id: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().await;
-        let token = conn
+        let row = conn
             .query_row(
-                "SELECT refresh_token FROM refresh_tokens WHERE user_id = ?1",
+                "SELECT refresh_token, expires_at FROM refresh_tokens WHERE user_id = ?1",
                 params![user_id],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()
             .context("Failed to query refresh token")?;
-        Ok(token)
+
+        let Some((token, expires_at)) = row else {
+            return Ok(None);
+        };
+
+        // Compare in Rust: stored values are RFC3339 with offsets, so lexicographic
+        // SQLite comparison would be unreliable. Unparseable timestamps are treated
+        // as expired (fail closed).
+        let expired = match chrono::DateTime::parse_from_rfc3339(&expires_at) {
+            Ok(dt) => dt.with_timezone(&chrono::Utc) <= chrono::Utc::now(),
+            Err(_) => true,
+        };
+
+        if expired {
+            conn.execute(
+                "DELETE FROM refresh_tokens WHERE user_id = ?1",
+                params![user_id],
+            )
+            .context("Failed to delete expired refresh token")?;
+            return Ok(None);
+        }
+
+        Ok(Some(token))
     }
 
     /// Delete a stored refresh token for a user.
@@ -1306,5 +1357,134 @@ mod tests {
         let loaded = db.get_schedule().await.unwrap();
         assert_eq!(loaded.cron_expression, "0 */2 * * *");
         assert_eq!(loaded.timezone, "Europe/Madrid");
+    }
+
+    // ── Refresh token expiry ──
+
+    /// Test-only helper: insert a refresh token with an arbitrary `expires_at`.
+    /// The public `save_refresh_token` hardcodes a 30-day expiry, so tests need
+    /// to control the stored timestamp directly.
+    impl Database {
+        async fn insert_refresh_token_with_expiry(
+            &self,
+            user_id: &str,
+            refresh_token: &str,
+            expires_at: &str,
+        ) -> Result<()> {
+            let conn = self.conn.lock().await;
+            conn.execute(
+                "INSERT INTO refresh_tokens (user_id, refresh_token, expires_at) VALUES (?1, ?2, ?3) \
+                 ON CONFLICT(user_id) DO UPDATE SET \
+                 refresh_token = excluded.refresh_token, expires_at = excluded.expires_at",
+                params![user_id, refresh_token, expires_at],
+            )
+            .context("Failed to insert test refresh token")?;
+            Ok(())
+        }
+
+        async fn count_refresh_tokens(&self, user_id: &str) -> i64 {
+            let conn = self.conn.lock().await;
+            conn.query_row(
+                "SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?1",
+                params![user_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_refresh_token_expired_returns_none_and_deletes_row() {
+        let (db, _dir) = test_db().await;
+        let past = (Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+        db.insert_refresh_token_with_expiry("user-expired", "tok-expired", &past)
+            .await
+            .unwrap();
+
+        let result = db.get_refresh_token("user-expired").await.unwrap();
+        assert!(result.is_none());
+        // The expired row must have been removed from storage.
+        assert_eq!(db.count_refresh_tokens("user-expired").await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_refresh_token_valid_returns_some() {
+        let (db, _dir) = test_db().await;
+        let future = (Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+        db.insert_refresh_token_with_expiry("user-valid", "tok-valid", &future)
+            .await
+            .unwrap();
+
+        let result = db.get_refresh_token("user-valid").await.unwrap();
+        assert_eq!(result.as_deref(), Some("tok-valid"));
+        // A valid row must not be deleted.
+        assert_eq!(db.count_refresh_tokens("user-valid").await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_refresh_token_unparseable_expiry_treated_as_expired() {
+        let (db, _dir) = test_db().await;
+        db.insert_refresh_token_with_expiry("user-bad", "tok-bad", "not-a-timestamp")
+            .await
+            .unwrap();
+
+        let result = db.get_refresh_token("user-bad").await.unwrap();
+        assert!(result.is_none());
+        assert_eq!(db.count_refresh_tokens("user-bad").await, 0);
+    }
+
+    // ── Refresh token compare-and-swap rotation ──
+
+    #[tokio::test]
+    async fn test_save_refresh_token_if_current_updates_when_token_matches() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-cas", "old-token", 3600)
+            .await
+            .unwrap();
+
+        let updated = db
+            .save_refresh_token_if_current("user-cas", "old-token", "new-token", 3600)
+            .await
+            .unwrap();
+
+        assert!(updated);
+        assert_eq!(
+            db.get_refresh_token("user-cas").await.unwrap().as_deref(),
+            Some("new-token")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_save_refresh_token_if_current_returns_false_when_row_absent() {
+        let (db, _dir) = test_db().await;
+
+        let updated = db
+            .save_refresh_token_if_current("ghost-user", "any-token", "new-token", 3600)
+            .await
+            .unwrap();
+
+        assert!(!updated);
+        // A failed CAS must not insert a new row.
+        assert_eq!(db.count_refresh_tokens("ghost-user").await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_save_refresh_token_if_current_returns_false_when_token_differs() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-cas2", "stored-token", 3600)
+            .await
+            .unwrap();
+
+        let updated = db
+            .save_refresh_token_if_current("user-cas2", "stale-token", "new-token", 3600)
+            .await
+            .unwrap();
+
+        assert!(!updated);
+        // The stored token must be left untouched.
+        assert_eq!(
+            db.get_refresh_token("user-cas2").await.unwrap().as_deref(),
+            Some("stored-token")
+        );
     }
 }

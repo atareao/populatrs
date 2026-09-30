@@ -19,6 +19,7 @@ pub struct OidcMetadata {
     pub token_endpoint: Option<String>,
     pub userinfo_endpoint: Option<String>,
     pub jwks_uri: Option<String>,
+    pub end_session_endpoint: Option<String>,
 }
 
 // ───── JWKS ─────
@@ -214,4 +215,39 @@ pub struct AuthUser {
     pub user_id: String,
     pub email: Option<String>,
     pub name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_oidc_metadata_with_end_session_endpoint() {
+        let json = r#"{
+            "issuer": "https://idp.example.com",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "userinfo_endpoint": "https://idp.example.com/userinfo",
+            "jwks_uri": "https://idp.example.com/jwks",
+            "end_session_endpoint": "https://idp.example.com/logout"
+        }"#;
+        let meta: OidcMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            meta.end_session_endpoint.as_deref(),
+            Some("https://idp.example.com/logout")
+        );
+    }
+
+    #[test]
+    fn test_oidc_metadata_without_end_session_endpoint() {
+        let json = r#"{
+            "issuer": "https://idp.example.com",
+            "authorization_endpoint": "https://idp.example.com/authorize",
+            "token_endpoint": "https://idp.example.com/token",
+            "userinfo_endpoint": "https://idp.example.com/userinfo",
+            "jwks_uri": "https://idp.example.com/jwks"
+        }"#;
+        let meta: OidcMetadata = serde_json::from_str(json).unwrap();
+        assert!(meta.end_session_endpoint.is_none());
+    }
 }

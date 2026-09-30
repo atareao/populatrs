@@ -1,27 +1,26 @@
 import { useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 import { Button, Card, Typography, Divider, Image } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
-import { getToken } from "../store/auth";
+import { getToken, clearToken, hasValidSession } from "../store/auth";
 
 const { Title, Text } = Typography;
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    const token = searchParams.get("token");
-    if (token) {
-      localStorage.setItem("populatrs_token", token);
-      sessionStorage.setItem("populatrs_token", token);
+    if (hasValidSession()) {
       navigate("/", { replace: true });
+      return;
     }
-    const existingToken = getToken();
-    if (existingToken) {
-      navigate("/", { replace: true });
+
+    // A token exists but is expired/malformed: purge it so the user is not
+    // short-circuited into the app, then show the login button.
+    if (getToken()) {
+      clearToken();
     }
-  }, [searchParams, navigate]);
+  }, [navigate]);
 
   const handleLogin = () => {
     window.location.href = "/auth/login";
