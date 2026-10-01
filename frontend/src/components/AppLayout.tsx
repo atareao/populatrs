@@ -14,6 +14,7 @@ import { Outlet, useNavigate, useLocation } from "react-router";
 import { clearToken } from "../store/auth";
 import { logout } from "../api/http";
 import { safeRedirectTarget } from "../utils/redirect";
+import { useSessionActivity } from "../hooks/useSessionActivity";
 
 const { Content, Sider } = Layout;
 const { Text } = Typography;
@@ -34,6 +35,9 @@ export default function AppLayout() {
   // Ref (not just state) so a second click within the same synchronous tick is
   // blocked before React re-renders and disables the button.
   const loggingOutRef = useRef(false);
+
+  // Proactively end the local session on idle/absolute timeout (D6).
+  useSessionActivity();
 
   const handleLogout = async () => {
     if (loggingOutRef.current) return;

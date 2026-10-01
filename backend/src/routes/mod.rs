@@ -43,6 +43,7 @@ pub fn api_routes() -> Router<Arc<AppState>> {
     // Protected routes (auth required)
     let protected = Router::new()
         .route("/api/me", routing::get(auth_routes::me))
+        .route("/auth/activity", routing::post(auth_routes::activity))
         .route("/api/feeds", routing::get(feeds::list).post(feeds::create))
         .route(
             "/api/feeds/{id}",

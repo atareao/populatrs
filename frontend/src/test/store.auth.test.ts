@@ -5,7 +5,18 @@ import {
   clearToken,
   isTokenValid,
   hasValidSession,
+  isSessionWindowValid,
   getSessionGeneration,
+  startSession,
+  recordActivity,
+  getSessionStart,
+  getLastActivity,
+  setSessionLimits,
+  resetSessionLimits,
+  getSessionIdleLimit,
+  getSessionAbsoluteLimit,
+  SESSION_IDLE_TIMEOUT_SECONDS,
+  SESSION_ABSOLUTE_TIMEOUT_SECONDS,
 } from "../store/auth";
 
 // --- JWT helpers -----------------------------------------------------------
@@ -27,6 +38,7 @@ describe("store/auth", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    resetSessionLimits();
   });
 
   it("returns null when no token is stored", () => {
@@ -186,6 +198,166 @@ describe("store/auth", () => {
       setToken("session-only");
       expect(sessionStorage.getItem("populatrs_token")).toBe("session-only");
       expect(localStorage.getItem("populatrs_token")).toBeNull();
+    });
+  });
+
+  describe("session window storage", () => {
+    it("returns null for both timestamps when nothing is recorded", () => {
+      expect(getSessionStart()).toBeNull();
+      expect(getLastActivity()).toBeNull();
+    });
+
+    it("records the session start and the last activity at login", () => {
+      startSession(1_000_000);
+      expect(getSessionStart()).toBe(1_000_000);
+      expect(getLastActivity()).toBe(1_000_000);
+    });
+
+    it("updates only the last activity on recordActivity", () => {
+      startSession(1_000_000);
+      recordActivity(2_000_000);
+      expect(getSessionStart()).toBe(1_000_000);
+      expect(getLastActivity()).toBe(2_000_000);
+    });
+
+    it("does not move the session start when recording activity", () => {
+      startSession(1_000_000);
+      recordActivity(5_000_000);
+      recordActivity(9_000_000);
+      expect(getSessionStart()).toBe(1_000_000);
+      expect(getLastActivity()).toBe(9_000_000);
+    });
+
+    it("stores the window in sessionStorage only", () => {
+      startSession(1_000_000);
+      recordActivity(2_000_000);
+      expect(sessionStorage.getItem("populatrs_session_start")).toBe("1000000");
+      expect(sessionStorage.getItem("populatrs_last_activity")).toBe("2000000");
+      expect(localStorage.length).toBe(0);
+    });
+
+    it("clears the session window when the token is cleared", () => {
+      startSession(1_000_000);
+      recordActivity(2_000_000);
+      clearToken();
+      expect(getSessionStart()).toBeNull();
+      expect(getLastActivity()).toBeNull();
+    });
+  });
+
+  describe("session window validity", () => {
+    const idleMs = SESSION_IDLE_TIMEOUT_SECONDS * 1000;
+    const absoluteMs = SESSION_ABSOLUTE_TIMEOUT_SECONDS * 1000;
+
+    it("is valid when both timestamps are within their windows", () => {
+      const now = Date.now();
+      startSession(now);
+      recordActivity(now);
+      expect(isSessionWindowValid()).toBe(true);
+    });
+
+    it("is invalid when the last activity is older than the idle timeout", () => {
+      const now = Date.now();
+      startSession(now);
+      recordActivity(now - idleMs - 60_000);
+      expect(isSessionWindowValid()).toBe(false);
+    });
+
+    it("is invalid when the session start is older than the absolute lifetime", () => {
+      const now = Date.now();
+      startSession(now - absoluteMs - 60_000);
+      recordActivity(now);
+      expect(isSessionWindowValid()).toBe(false);
+    });
+
+    it("is valid when no window has been tracked yet", () => {
+      expect(isSessionWindowValid()).toBe(true);
+    });
+  });
+
+  describe("hasValidSession with the session window", () => {
+    const idleMs = SESSION_IDLE_TIMEOUT_SECONDS * 1000;
+    const absoluteMs = SESSION_ABSOLUTE_TIMEOUT_SECONDS * 1000;
+
+    it("reports invalid when the stored JWT has not expired but the idle window has passed", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() + 3600 }));
+      startSession(now);
+      recordActivity(now - idleMs - 60_000);
+      expect(hasValidSession()).toBe(false);
+    });
+
+    it("reports invalid when the stored JWT has not expired but the absolute lifetime has passed", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() + 3600 }));
+      startSession(now - absoluteMs - 60_000);
+      recordActivity(now);
+      expect(hasValidSession()).toBe(false);
+    });
+
+    it("reports valid when the JWT is unexpired and both windows are fresh", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() + 3600 }));
+      startSession(now);
+      recordActivity(now);
+      expect(hasValidSession()).toBe(true);
+    });
+
+    it("reports invalid when the JWT is expired even if the window is fresh", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() - 3600 }));
+      startSession(now);
+      recordActivity(now);
+      expect(hasValidSession()).toBe(false);
+    });
+  });
+
+  describe("setSessionLimits", () => {
+    it("uses the built-in defaults before any server limits are applied", () => {
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS);
+    });
+
+    it("keeps a window valid under a raised server idle limit that the default would reject", () => {
+      const now = Date.now();
+      // Inactive for 60 s beyond the default idle limit: invalid by default.
+      startSession(now);
+      recordActivity(now - (SESSION_IDLE_TIMEOUT_SECONDS + 60) * 1000);
+      expect(isSessionWindowValid(now)).toBe(false);
+
+      // The operator configured a longer idle limit: the same window is valid.
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS * 4, SESSION_ABSOLUTE_TIMEOUT_SECONDS);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 4);
+      expect(isSessionWindowValid(now)).toBe(true);
+    });
+
+    it("keeps a window valid under a raised server absolute limit", () => {
+      const now = Date.now();
+      startSession(now - (SESSION_ABSOLUTE_TIMEOUT_SECONDS + 60) * 1000);
+      recordActivity(now);
+      expect(isSessionWindowValid(now)).toBe(false);
+
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS, SESSION_ABSOLUTE_TIMEOUT_SECONDS * 2);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS * 2);
+      expect(isSessionWindowValid(now)).toBe(true);
+    });
+
+    it("ignores non-finite and non-positive values, keeping the previous limit", () => {
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS * 3, SESSION_ABSOLUTE_TIMEOUT_SECONDS * 3);
+
+      setSessionLimits(Number.NaN, 0);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 3);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS * 3);
+
+      setSessionLimits(Infinity, -10);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 3);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS * 3);
+    });
+
+    it("accepts a partial update and leaves the other limit untouched", () => {
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS * 5, undefined);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 5);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS);
     });
   });
 });

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Extension, Query, State},
     http::{header, StatusCode},
     response::{Html, IntoResponse, Redirect},
     Json,
@@ -13,7 +13,9 @@ use sha2::{Digest, Sha256};
 use tracing::instrument;
 
 use crate::auth::{AppState, AuthUser, OidcMetadata};
+use crate::config::SessionTimeouts;
 use crate::db::Database;
+use crate::middleware::enforce_session_timeouts;
 
 #[derive(Debug, Deserialize)]
 pub struct AuthCallbackQuery {
@@ -33,6 +35,10 @@ pub struct MeResponse {
     pub sub: String,
     pub email: Option<String>,
     pub name: Option<String>,
+    /// Idle timeout in seconds, so the client can mirror the server window.
+    pub idle_seconds: u64,
+    /// Absolute session lifetime in seconds (anchored at login).
+    pub absolute_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -284,6 +290,8 @@ pub async fn callback(
 <body>
 <script>
 sessionStorage.setItem('populatrs_token', '{jwt}');
+sessionStorage.setItem('populatrs_session_start', String(Date.now()));
+sessionStorage.setItem('populatrs_last_activity', String(Date.now()));
 {user_data}
 window.location.href = '/';
 </script>
@@ -325,6 +333,8 @@ pub async fn dev_login(
 <body>
 <script>
 sessionStorage.setItem('populatrs_token', '{jwt}');
+sessionStorage.setItem('populatrs_session_start', String(Date.now()));
+sessionStorage.setItem('populatrs_last_activity', String(Date.now()));
 sessionStorage.setItem('populatrs_user', JSON.stringify({user}));
 window.location.href = '/';
 </script>
@@ -341,12 +351,76 @@ window.location.href = '/';
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
-pub async fn me(axum::Extension(user): axum::Extension<AuthUser>) -> Json<MeResponse> {
+pub async fn me(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+) -> Json<MeResponse> {
     Json(MeResponse {
         sub: user.user_id,
         email: user.email,
         name: user.name,
+        idle_seconds: state.config.session_timeouts.idle_seconds,
+        absolute_seconds: state.config.session_timeouts.absolute_seconds,
     })
+}
+
+/// Record an explicit user-activity signal for the caller's session.
+///
+/// Returns `Ok(true)` when a live session was touched (extending only the idle
+/// window), `Ok(false)` when no session exists or the session has expired (in
+/// which case it is revoked), and `Err` on a storage failure.
+pub async fn record_session_activity(
+    db: &Database,
+    user_id: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    timeouts: &SessionTimeouts,
+) -> anyhow::Result<bool> {
+    let Some(session) = db.get_session(user_id).await? else {
+        return Ok(false);
+    };
+
+    if session.is_expired(now, timeouts.idle_seconds, timeouts.absolute_seconds) {
+        if let Err(e) = db.delete_refresh_token(user_id).await {
+            tracing::warn!(user_id = %user_id, error = %e, "failed to revoke expired session");
+        }
+        return Ok(false);
+    }
+
+    db.touch_activity(user_id, now).await?;
+    Ok(true)
+}
+
+/// Refresh the caller's session activity timestamp.
+///
+/// In dev mode there is no server-side session, so report success (204) to keep
+/// the client-side activity tracker working. Otherwise enforce the timeouts:
+/// `204 NO_CONTENT` when the session is live, `401 UNAUTHORIZED` when it is
+/// missing or expired.
+pub async fn activity(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+) -> StatusCode {
+    if state.jwt_validator.is_dev() {
+        return StatusCode::NO_CONTENT;
+    }
+
+    match record_session_activity(
+        &state.db,
+        &user.user_id,
+        chrono::Utc::now(),
+        &state.config.session_timeouts,
+    )
+    .await
+    {
+        Ok(true) => StatusCode::NO_CONTENT,
+        Ok(false) => StatusCode::UNAUTHORIZED,
+        Err(e) => {
+            // A transient storage failure must not force a logout. Mirror
+            // `enforce_session_timeouts`: surface a 500 so the client retries.
+            tracing::warn!(user_id = %user.user_id, error = %e, "failed to record session activity");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -395,6 +469,17 @@ pub async fn refresh_token(
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
     let user_id = claims.sub;
+
+    // Guard the refresh path with the server-authoritative session timeouts.
+    // Must run before the provider exchange so an expired session cannot mint a
+    // new token. Never resets `created_at`, so absolute lifetime is not extended.
+    enforce_session_timeouts(
+        &state.db,
+        &user_id,
+        chrono::Utc::now(),
+        &state.config.session_timeouts,
+    )
+    .await?;
 
     // 1. Obtener refresh_token de SQLite
     let refresh_token = state
@@ -639,6 +724,9 @@ pub async fn logout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SessionTimeouts;
+    use crate::middleware::enforce_session_timeouts;
+    use chrono::Utc;
 
     // ── AuthCallbackQuery deserialization ──
 
@@ -697,11 +785,15 @@ mod tests {
             sub: "user123".into(),
             email: Some("user@test.com".into()),
             name: Some("Test User".into()),
+            idle_seconds: 1800,
+            absolute_seconds: 14400,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["sub"], "user123");
         assert_eq!(json["email"], "user@test.com");
         assert_eq!(json["name"], "Test User");
+        assert_eq!(json["idle_seconds"], 1800);
+        assert_eq!(json["absolute_seconds"], 14400);
     }
 
     #[test]
@@ -710,6 +802,8 @@ mod tests {
             sub: "anon".into(),
             email: None,
             name: None,
+            idle_seconds: 1800,
+            absolute_seconds: 14400,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["sub"], "anon");
@@ -1202,5 +1296,139 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    // ── Session activity signal ──
+
+    #[tokio::test]
+    async fn test_record_activity_valid_session_updates_timestamp() {
+        let (db, _dir) = test_db().await;
+        let t0 = Utc::now() - chrono::Duration::minutes(5);
+        db.create_session("user-act", "tok", 3600, t0)
+            .await
+            .unwrap();
+
+        let now = Utc::now();
+        let ok = record_session_activity(&db, "user-act", now, &SessionTimeouts::default())
+            .await
+            .unwrap();
+        assert!(ok);
+
+        let session = db.get_session("user-act").await.unwrap().unwrap();
+        assert_eq!(session.last_activity_at, now.to_rfc3339());
+        assert_eq!(session.created_at, t0.to_rfc3339());
+    }
+
+    #[tokio::test]
+    async fn test_record_activity_idle_expired_returns_false_and_revokes() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-act-idle",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(1801),
+        )
+        .await
+        .unwrap();
+
+        let ok = record_session_activity(&db, "user-act-idle", now, &SessionTimeouts::default())
+            .await
+            .unwrap();
+        assert!(!ok);
+        assert!(db.get_session("user-act-idle").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_record_activity_absolute_expired_returns_false_and_revokes() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-act-abs",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(14401),
+        )
+        .await
+        .unwrap();
+        db.touch_activity("user-act-abs", now).await.unwrap();
+
+        let ok = record_session_activity(&db, "user-act-abs", now, &SessionTimeouts::default())
+            .await
+            .unwrap();
+        assert!(!ok);
+        assert!(db.get_session("user-act-abs").await.unwrap().is_none());
+    }
+
+    // ── Refresh session limits ──
+
+    #[tokio::test]
+    async fn test_refresh_guard_within_limits_passes_and_rotation_keeps_created_at() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session("user-refresh", "old-token", 3600, now)
+            .await
+            .unwrap();
+        let created_before = db
+            .get_session("user-refresh")
+            .await
+            .unwrap()
+            .unwrap()
+            .created_at;
+
+        let guard =
+            enforce_session_timeouts(&db, "user-refresh", now, &SessionTimeouts::default()).await;
+        assert_eq!(guard, Ok(()));
+
+        let persisted =
+            persist_rotated_token(&db, "user-refresh", "old-token", Some("new-token"), 3600)
+                .await
+                .unwrap();
+        assert!(persisted);
+
+        let session = db.get_session("user-refresh").await.unwrap().unwrap();
+        assert_eq!(session.refresh_token, "new-token");
+        assert_eq!(session.created_at, created_before);
+    }
+
+    #[tokio::test]
+    async fn test_refresh_guard_idle_expired_revokes_and_rejects() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-refresh-idle",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(1801),
+        )
+        .await
+        .unwrap();
+
+        let guard =
+            enforce_session_timeouts(&db, "user-refresh-idle", now, &SessionTimeouts::default())
+                .await;
+        assert_eq!(guard, Err(StatusCode::UNAUTHORIZED));
+        assert!(db.get_session("user-refresh-idle").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_refresh_guard_absolute_expired_revokes_even_with_recent_activity() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-refresh-abs",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(14401),
+        )
+        .await
+        .unwrap();
+        db.touch_activity("user-refresh-abs", now).await.unwrap();
+
+        let guard =
+            enforce_session_timeouts(&db, "user-refresh-abs", now, &SessionTimeouts::default())
+                .await;
+        assert_eq!(guard, Err(StatusCode::UNAUTHORIZED));
+        assert!(db.get_session("user-refresh-abs").await.unwrap().is_none());
     }
 }

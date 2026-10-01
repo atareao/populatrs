@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { fetchMe, SessionExpiredError, type User } from "../api/http";
-import { getToken } from "../store/auth";
+import { getToken, setSessionLimits } from "../store/auth";
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -21,6 +21,9 @@ export function useAuth() {
 
     fetchMe()
       .then((u) => {
+        // Adopt the server-configured session limits when provided; a missing
+        // value leaves the current/default limits untouched.
+        setSessionLimits(u.idle_seconds, u.absolute_seconds);
         setUser(u);
         setError(false);
       })
