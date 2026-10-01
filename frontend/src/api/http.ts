@@ -2,6 +2,12 @@ export interface User {
   sub: string;
   email: string;
   name: string;
+  /**
+   * Server-configured session limits (seconds). Optional because older servers
+   * may omit them; the client falls back to its own defaults when absent.
+   */
+  idle_seconds?: number;
+  absolute_seconds?: number;
 }
 
 export interface FeedPublisherBinding {
@@ -180,6 +186,18 @@ async function fetcher<T>(path: string, opts?: { method?: string; body?: unknown
 // Auth
 export async function fetchMe(): Promise<User> {
   return fetcher<User>("/api/me");
+}
+
+/**
+ * Sends an explicit, authenticated user-activity signal to the server.
+ *
+ * This is the only call that extends the server-side idle window; ordinary
+ * requests and background polling must never call it. A 401 (session timed out
+ * server-side) flows through the shared 401 interceptor, so it clears the token
+ * and surfaces a `SessionExpiredError` exactly like any other expired session.
+ */
+export async function sendActivity(): Promise<void> {
+  return fetcher<void>("/auth/activity", { method: "POST" });
 }
 
 /**

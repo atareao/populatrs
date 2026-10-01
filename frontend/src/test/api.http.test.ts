@@ -14,6 +14,7 @@ import {
   updateStorage,
   fetchStatus,
   logout,
+  sendActivity,
   SessionExpiredError,
   type FeedConfig,
 } from "../api/http";
@@ -520,6 +521,35 @@ describe("api/http", () => {
 
       const result = await logout();
       expect(result.end_session_url).toBeNull();
+    });
+  });
+
+  describe("sendActivity", () => {
+    it("issues an authenticated POST /auth/activity", async () => {
+      setToken("raw-token");
+      mockFetch(204, null);
+
+      await sendActivity();
+
+      expect(fetch).toHaveBeenCalledWith(
+        "/auth/activity",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer raw-token",
+          }),
+        }),
+      );
+    });
+
+    it("treats a 401 from the activity call as session expiry and clears the token", async () => {
+      setToken("raw-token");
+      // Both the activity call and the silent refresh reject with 401.
+      mockFetch(401, "Unauthorized");
+
+      const err = await sendActivity().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SessionExpiredError);
+      expect(sessionStorage.getItem("populatrs_token")).toBeNull();
     });
   });
 });

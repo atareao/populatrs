@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Mutex;
 
@@ -126,6 +126,22 @@ impl Database {
 
         // Migration: add description column to published_posts for existing databases
         let _ = conn.execute_batch("ALTER TABLE published_posts ADD COLUMN description TEXT;");
+
+        // Migration: session lifecycle timestamps on refresh_tokens.
+        // `last_activity_at` is new; `created_at` may be missing on databases
+        // that predate it, because `CREATE TABLE IF NOT EXISTS` does not add
+        // columns to an existing table. Both are backfilled to now so sessions
+        // that exist at migration time get a fresh anchor.
+        let _ = conn.execute_batch("ALTER TABLE refresh_tokens ADD COLUMN last_activity_at TEXT;");
+        let _ = conn.execute_batch("ALTER TABLE refresh_tokens ADD COLUMN created_at TEXT;");
+        // Surface backfill failures (e.g. a locked or corrupt database) without
+        // aborting startup: a logged warning is preferable to a silent `let _`.
+        if let Err(e) = conn.execute_batch(
+            "UPDATE refresh_tokens SET last_activity_at = datetime('now') WHERE last_activity_at IS NULL;
+             UPDATE refresh_tokens SET created_at = datetime('now') WHERE created_at IS NULL;",
+        ) {
+            tracing::warn!(error = %e, "failed to backfill refresh_tokens session timestamps");
+        }
 
         // Migration: add ON DELETE CASCADE to publish_results foreign key
         // This ensures deleting from published_posts automatically cleans up related publish_results
@@ -949,28 +965,90 @@ impl Database {
 
     // ───── Refresh Tokens ─────
 
-    /// Save a refresh token for a user (upsert).
-    /// The `_expires_in` parameter is the access token lifetime and is ignored;
-    /// refresh tokens in PocketID live 30 days, so we use that as the stored expiry.
-    pub async fn save_refresh_token(
+    /// Create (or replace) the server-side session for `user_id` at login.
+    ///
+    /// Sets the immutable absolute-lifetime anchor (`created_at`) and the
+    /// last-activity time (`last_activity_at`) to `now`. A fresh login starts a
+    /// fresh session, so an existing row is overwritten with a new anchor.
+    pub async fn create_session(
         &self,
         user_id: &str,
         refresh_token: &str,
         _expires_in: u64,
+        now: DateTime<Utc>,
     ) -> Result<()> {
         let conn = self.conn.lock().await;
-        // Refresh tokens in PocketID live 30 days; use that as the stored expiry
-        let expires_at = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+        // Refresh tokens in PocketID live 30 days; use that as the stored expiry.
+        let expires_at = (now + chrono::Duration::days(30)).to_rfc3339();
+        let stamp = now.to_rfc3339();
         conn.execute(
-            "INSERT INTO refresh_tokens (user_id, refresh_token, expires_at) \
-             VALUES (?1, ?2, ?3) \
+            "INSERT INTO refresh_tokens (user_id, refresh_token, expires_at, created_at, last_activity_at) \
+             VALUES (?1, ?2, ?3, ?4, ?4) \
              ON CONFLICT(user_id) DO UPDATE SET \
              refresh_token = excluded.refresh_token, \
-             expires_at = excluded.expires_at",
-            params![user_id, refresh_token, expires_at],
+             expires_at = excluded.expires_at, \
+             created_at = excluded.created_at, \
+             last_activity_at = excluded.last_activity_at",
+            params![user_id, refresh_token, expires_at, stamp],
         )
-        .context("Failed to save refresh token")?;
+        .context("Failed to create session")?;
         Ok(())
+    }
+
+    /// Read the stored session for `user_id`, including both lifecycle
+    /// timestamps. Returns `None` when no session is stored.
+    pub async fn get_session(&self, user_id: &str) -> Result<Option<Session>> {
+        let conn = self.conn.lock().await;
+        let session = conn
+            .query_row(
+                "SELECT refresh_token, expires_at, created_at, last_activity_at \
+                 FROM refresh_tokens WHERE user_id = ?1",
+                params![user_id],
+                |row| {
+                    Ok(Session {
+                        refresh_token: row.get(0)?,
+                        expires_at: row.get(1)?,
+                        // Columns may be NULL on a partially-migrated database;
+                        // an empty string is unparseable and therefore expired.
+                        created_at: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                        last_activity_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()
+            .context("Failed to query session")?;
+        Ok(session)
+    }
+
+    /// Update only the last-activity time for a session. Never touches
+    /// `created_at`, so activity cannot extend the absolute lifetime.
+    ///
+    /// Returns `true` when a session row was updated, `false` when none exists.
+    pub async fn touch_activity(&self, user_id: &str, now: DateTime<Utc>) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let rows = conn
+            .execute(
+                "UPDATE refresh_tokens SET last_activity_at = ?1 WHERE user_id = ?2",
+                params![now.to_rfc3339(), user_id],
+            )
+            .context("Failed to update session activity")?;
+        Ok(rows > 0)
+    }
+
+    /// Save a refresh token for a user (upsert).
+    /// The `_expires_in` parameter is the access token lifetime and is ignored;
+    /// refresh tokens in PocketID live 30 days, so we use that as the stored expiry.
+    ///
+    /// Delegates to [`Database::create_session`] so the session's lifecycle
+    /// timestamps are set at login.
+    pub async fn save_refresh_token(
+        &self,
+        user_id: &str,
+        refresh_token: &str,
+        expires_in: u64,
+    ) -> Result<()> {
+        self.create_session(user_id, refresh_token, expires_in, Utc::now())
+            .await
     }
 
     /// Atomically rotate a stored refresh token only when it still matches
@@ -1192,6 +1270,53 @@ pub struct Stats {
     pub total_publishers: u64,
     pub total_published: u64,
     pub schedule: ScheduleConfig,
+}
+
+/// A stored server-side session, backed by a `refresh_tokens` row.
+#[derive(Debug, Clone)]
+pub struct Session {
+    /// The provider refresh token exchanged on refresh.
+    pub refresh_token: String,
+    /// Provider refresh-token expiry (RFC3339).
+    pub expires_at: String,
+    /// Absolute-lifetime anchor, set at login and never reset.
+    pub created_at: String,
+    /// Last explicit user activity time.
+    pub last_activity_at: String,
+}
+
+impl Session {
+    /// Returns `true` when `now` is past either the absolute lifetime or the
+    /// idle window: `now > created_at + absolute` OR
+    /// `now > last_activity_at + idle`.
+    ///
+    /// Unparseable timestamps fail closed (treated as expired).
+    pub fn is_expired(&self, now: DateTime<Utc>, idle_seconds: u64, absolute_seconds: u64) -> bool {
+        let Some(created) = parse_timestamp(&self.created_at) else {
+            return true;
+        };
+        let Some(activity) = parse_timestamp(&self.last_activity_at) else {
+            return true;
+        };
+        let absolute_deadline = created + chrono::Duration::seconds(absolute_seconds as i64);
+        let idle_deadline = activity + chrono::Duration::seconds(idle_seconds as i64);
+        now > absolute_deadline || now > idle_deadline
+    }
+}
+
+/// Parse a session timestamp written either as RFC3339 (new sessions) or as
+/// SQLite's `datetime('now')` output `YYYY-MM-DD HH:MM:SS` (migration backfill).
+fn parse_timestamp(value: &str) -> Option<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S") {
+        return Some(naive.and_utc());
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S") {
+        return Some(naive.and_utc());
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1486,5 +1611,132 @@ mod tests {
             db.get_refresh_token("user-cas2").await.unwrap().as_deref(),
             Some("stored-token")
         );
+    }
+
+    // ── Session lifecycle ──
+
+    #[tokio::test]
+    async fn test_create_session_sets_both_timestamps() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session("user-sess", "tok-sess", 3600, now)
+            .await
+            .unwrap();
+
+        let session = db.get_session("user-sess").await.unwrap().unwrap();
+        assert_eq!(session.refresh_token, "tok-sess");
+        assert_eq!(session.created_at, now.to_rfc3339());
+        assert_eq!(session.last_activity_at, now.to_rfc3339());
+    }
+
+    #[tokio::test]
+    async fn test_get_session_unknown_user_returns_none() {
+        let (db, _dir) = test_db().await;
+        assert!(db.get_session("nobody").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_touch_activity_updates_only_last_activity() {
+        let (db, _dir) = test_db().await;
+        let t0 = Utc::now() - chrono::Duration::minutes(10);
+        db.create_session("user-touch", "tok", 3600, t0)
+            .await
+            .unwrap();
+
+        let t1 = Utc::now();
+        let updated = db.touch_activity("user-touch", t1).await.unwrap();
+        assert!(updated);
+
+        let session = db.get_session("user-touch").await.unwrap().unwrap();
+        assert_eq!(session.created_at, t0.to_rfc3339());
+        assert_eq!(session.last_activity_at, t1.to_rfc3339());
+    }
+
+    #[tokio::test]
+    async fn test_touch_activity_unknown_user_returns_false() {
+        let (db, _dir) = test_db().await;
+        assert!(!db.touch_activity("nobody", Utc::now()).await.unwrap());
+    }
+
+    #[test]
+    fn test_session_is_expired_past_idle_window() {
+        let now = Utc::now();
+        let session = Session {
+            refresh_token: "t".into(),
+            expires_at: (now + chrono::Duration::days(1)).to_rfc3339(),
+            created_at: now.to_rfc3339(),
+            last_activity_at: (now - chrono::Duration::seconds(1801)).to_rfc3339(),
+        };
+        assert!(session.is_expired(now, 1800, 14400));
+    }
+
+    #[test]
+    fn test_session_is_expired_past_absolute_lifetime_with_recent_activity() {
+        let now = Utc::now();
+        let session = Session {
+            refresh_token: "t".into(),
+            expires_at: (now + chrono::Duration::days(1)).to_rfc3339(),
+            created_at: (now - chrono::Duration::seconds(14401)).to_rfc3339(),
+            last_activity_at: now.to_rfc3339(),
+        };
+        assert!(session.is_expired(now, 1800, 14400));
+    }
+
+    #[test]
+    fn test_session_not_expired_within_both_limits() {
+        let now = Utc::now();
+        let session = Session {
+            refresh_token: "t".into(),
+            expires_at: (now + chrono::Duration::days(1)).to_rfc3339(),
+            created_at: (now - chrono::Duration::seconds(100)).to_rfc3339(),
+            last_activity_at: (now - chrono::Duration::seconds(100)).to_rfc3339(),
+        };
+        assert!(!session.is_expired(now, 1800, 14400));
+    }
+
+    #[test]
+    fn test_session_with_unparseable_timestamps_is_expired() {
+        let now = Utc::now();
+        let session = Session {
+            refresh_token: "t".into(),
+            expires_at: now.to_rfc3339(),
+            created_at: "not-a-timestamp".into(),
+            last_activity_at: now.to_rfc3339(),
+        };
+        assert!(session.is_expired(now, 1800, 14400));
+    }
+
+    #[tokio::test]
+    async fn test_migration_adds_session_columns_to_legacy_db() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("legacy.db");
+
+        // Simulate a database created before `created_at` / `last_activity_at`
+        // existed: `CREATE TABLE IF NOT EXISTS` cannot add those columns.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE refresh_tokens (
+                    user_id TEXT PRIMARY KEY,
+                    refresh_token TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            let future = (Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+            conn.execute(
+                "INSERT INTO refresh_tokens (user_id, refresh_token, expires_at) VALUES (?1, ?2, ?3)",
+                params!["legacy-user", "legacy-token", future],
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(&path).await.unwrap();
+        let session = db.get_session("legacy-user").await.unwrap().unwrap();
+        // Both columns were added and backfilled to a parseable timestamp, so
+        // the freshly-anchored session is not yet expired.
+        assert!(!session.created_at.is_empty());
+        assert!(!session.last_activity_at.is_empty());
+        assert!(!session.is_expired(Utc::now(), 1800, 14400));
     }
 }
