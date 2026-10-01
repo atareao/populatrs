@@ -37,11 +37,13 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/auth/callback", routing::get(auth_routes::callback))
         .route("/auth/dev-login", routing::get(auth_routes::dev_login))
         .route("/auth/refresh", routing::post(auth_routes::refresh_token))
+        .route("/auth/logout", routing::post(auth_routes::logout))
         .route("/oauth/callback", routing::get(oauth::callback_get));
 
     // Protected routes (auth required)
     let protected = Router::new()
         .route("/api/me", routing::get(auth_routes::me))
+        .route("/auth/activity", routing::post(auth_routes::activity))
         .route("/api/feeds", routing::get(feeds::list).post(feeds::create))
         .route(
             "/api/feeds/{id}",

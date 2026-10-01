@@ -2,6 +2,12 @@ export interface User {
   sub: string;
   email: string;
   name: string;
+  /**
+   * Server-configured session limits (seconds). Optional because older servers
+   * may omit them; the client falls back to its own defaults when absent.
+   */
+  idle_seconds?: number;
+  absolute_seconds?: number;
 }
 
 export interface FeedPublisherBinding {
@@ -46,28 +52,75 @@ export interface DashboardStatus {
   next_run_at: string | null;
 }
 
-import { getToken, setToken, clearToken } from "../store/auth";
+import { getToken, setToken, clearToken, getSessionGeneration } from "../store/auth";
+
+/**
+ * Thrown when the session is genuinely over: the API returned 401 and the
+ * silent refresh also failed. Distinct from transient errors (network/server)
+ * so callers can tell "log in again" apart from "try again".
+ */
+export class SessionExpiredError extends Error {
+  constructor(message = "Session expired") {
+    super(message);
+    this.name = "SessionExpiredError";
+  }
+}
 
 // Estado global para evitar múltiples refrescos concurrentes
-let refreshPromise: Promise<string | null> | null = null;
+let refreshPromise: Promise<string> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+/**
+ * Exchanges the raw (possibly expired) access token for a new one.
+ *
+ * Distinguishes a genuine auth failure from a transient one:
+ * - 401 from `/auth/refresh` → `SessionExpiredError` (the session is over).
+ * - network error or any other non-ok status → plain `Error` (retryable).
+ * - missing token → `SessionExpiredError`.
+ *
+ * The caller decides whether to clear the token based on the error type.
+ */
+async function refreshAccessToken(): Promise<string> {
   const currentToken = getToken();
-  if (!currentToken) return null;
+  if (!currentToken) {
+    throw new SessionExpiredError();
+  }
 
+  // Snapshot the session generation before the request. If the session is
+  // cleared while we wait (logout), the generation changes and the response
+  // must be discarded instead of restoring the token.
+  const generation = getSessionGeneration();
+
+  let res: Response;
   try {
-    const res = await fetch("/auth/refresh", {
+    res = await fetch("/auth/refresh", {
       method: "POST",
       headers: { Authorization: `Bearer ${currentToken}` },
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const newToken = data.access_token;
-    setToken(newToken);
-    return newToken;
-  } catch {
-    return null;
+  } catch (e) {
+    // Network error: transient. Keep the token so the user can retry.
+    throw e instanceof Error ? e : new Error("Refresh request failed");
   }
+
+  if (res.status === 401) {
+    throw new SessionExpiredError();
+  }
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: refresh failed`);
+  }
+
+  const data = (await res.json()) as { access_token?: string };
+  if (!data.access_token) {
+    throw new Error("Refresh response missing access_token");
+  }
+
+  // The session was cleared while the refresh was in flight: do not store the
+  // new token, and report the session as expired.
+  if (getSessionGeneration() !== generation) {
+    throw new SessionExpiredError();
+  }
+
+  setToken(data.access_token);
+  return data.access_token;
 }
 
 async function fetcher<T>(path: string, opts?: { method?: string; body?: unknown }): Promise<T> {
@@ -90,24 +143,35 @@ async function fetcher<T>(path: string, opts?: { method?: string; body?: unknown
       });
     }
 
-    const newToken = await refreshPromise;
-    if (newToken) {
-      // Reintentar con el nuevo token
-      headers["Authorization"] = `Bearer ${newToken}`;
-      const retry = await fetch(path, {
-        method: opts?.method ?? (opts?.body ? "POST" : "GET"),
-        headers,
-        body: opts?.body ? JSON.stringify(opts.body) : undefined,
-      });
-      if (retry.ok) {
-        if (retry.status === 204) return undefined as T;
-        return retry.json();
+    let newToken: string;
+    try {
+      newToken = await refreshPromise;
+    } catch (e) {
+      // Only a genuine session expiry clears the token. A transient failure
+      // (network/server) keeps it so useAuth can show the retry screen.
+      if (e instanceof SessionExpiredError) {
+        clearToken();
       }
+      throw e;
     }
 
-    // Refresh falló → limpiar y dejar que ProtectedRoute redirija
-    clearToken();
-    throw new Error("Session expired");
+    // Reintentar con el nuevo token
+    headers["Authorization"] = `Bearer ${newToken}`;
+    const retry = await fetch(path, {
+      method: opts?.method ?? (opts?.body ? "POST" : "GET"),
+      headers,
+      body: opts?.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (retry.ok) {
+      if (retry.status === 204) return undefined as T;
+      return retry.json();
+    }
+    if (retry.status === 401) {
+      clearToken();
+      throw new SessionExpiredError();
+    }
+    const retryText = await retry.text().catch(() => "unknown error");
+    throw new Error(`HTTP ${retry.status}: ${retryText}`);
   }
 
   if (!res.ok) {
@@ -122,6 +186,43 @@ async function fetcher<T>(path: string, opts?: { method?: string; body?: unknown
 // Auth
 export async function fetchMe(): Promise<User> {
   return fetcher<User>("/api/me");
+}
+
+/**
+ * Sends an explicit, authenticated user-activity signal to the server.
+ *
+ * This is the only call that extends the server-side idle window; ordinary
+ * requests and background polling must never call it. A 401 (session timed out
+ * server-side) flows through the shared 401 interceptor, so it clears the token
+ * and surfaces a `SessionExpiredError` exactly like any other expired session.
+ */
+export async function sendActivity(): Promise<void> {
+  return fetcher<void>("/auth/activity", { method: "POST" });
+}
+
+/**
+ * Revokes the server-side refresh token and returns the OIDC provider's
+ * end-session URL when available. Uses the RAW stored token (possibly expired)
+ * because the backend validates the signature while ignoring expiration.
+ * Never throws: on network error or non-ok response it resolves to
+ * `{ end_session_url: null }` so logout can always clear local state.
+ */
+export async function logout(): Promise<{ end_session_url: string | null }> {
+  const token = getToken();
+  try {
+    const res = await fetch("/auth/logout", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) return { end_session_url: null };
+
+    const data = (await res.json().catch(() => ({}))) as {
+      end_session_url?: string | null;
+    };
+    return { end_session_url: data.end_session_url ?? null };
+  } catch {
+    return { end_session_url: null };
+  }
 }
 
 // Feeds

@@ -7,6 +7,11 @@
 > **Versión**: 1.0
 > **Fecha**: 2026-08-26
 
+> **Actualización (2026-10-01)**: Populatrs ya no usa sesiones de larga duración.
+> Además del refresh OIDC, aplica un **idle timeout (30 min)** y un **lifetime
+> absoluto (4 h)** autoritativos en el servidor, y guarda el token **solo en
+> `sessionStorage`**. Ver §9 para la política vigente.
+
 ---
 
 ## Índice
@@ -33,7 +38,7 @@
 ### Causa raíz
 
 El token JWT que emite PocketID tiene una validez limitada (por defecto 1 hora).
-Populatrs actualmente:
+Estado anterior (ya resuelto):
 
 1. **No guarda el token en `localStorage`** — solo en `sessionStorage`, que es
    específico de cada pestaña y se borra al cerrar el navegador
@@ -65,7 +70,7 @@ Usuario → Login en PocketID → Código de autorización
 Usuario → Login en PocketID → Código de autorización
   → Backend canjea código por tokens en /api/oidc/token
   → Backend recibe: access_token + refresh_token + expires_in + id_token
-  → Backend guarda access_token en localStorage
+  → El HTML de login persiste el access_token en sessionStorage (nunca localStorage)
   → Backend guarda refresh_token en SQLite (asociado al usuario)
   → Frontend usa access_token en cada llamada API
   → Token expira (1h) → Backend responde 401
@@ -73,7 +78,7 @@ Usuario → Login en PocketID → Código de autorización
   → Backend canjea refresh_token en PocketID → nuevos tokens
   → Backend guarda nuevo access_token + nuevo refresh_token (rotación)
   → Frontend reintenta la llamada original ← ✅
-  → Si refresh_token también expira (30d) → Redirige al login
+  → Si la sesión supera el idle (30 min) o el lifetime absoluto (4 h) → Redirige al login
 ```
 
 ---
@@ -338,19 +343,23 @@ El endpoint debe estar protegido aunque sea público:
 
 ## 6. Implementación en frontend
 
-### 6.1 Guardar token en localStorage
+### 6.1 Guardar token en sessionStorage (no en localStorage)
 
 **Archivo**: `frontend/src/store/auth.ts`
 
+El access token se guarda **solo** en `sessionStorage`, para que cerrar el
+navegador termine la sesión. Nunca se escribe en `localStorage`.
+
 ```typescript
-// ✅ Guardar en ambos almacenes
 export function setToken(token: string): void {
   try {
     sessionStorage.setItem("populatrs_token", token);
-    localStorage.setItem("populatrs_token", token);
   } catch { /* noop */ }
 }
 ```
+
+> `localStorage` se lee únicamente como compatibilidad con tokens antiguos, que
+> además se purgan al limpiar la sesión.
 
 ### 6.2 Interceptor de 401 con refresh
 
@@ -468,14 +477,20 @@ refresh. Las demás deben esperar al mismo refresh y usar el nuevo token.
 
 **Solución**: Variable `refreshPromise` compartida (ver sección 6.2).
 
-### 7.2 Refresh token expirado (30 días)
+### 7.2 Expiración de la sesión: idle (30 min) y absoluta (4 h)
 
-Si el refresh_token ha expirado (>30 días sin usar la app), PocketID devuelve
-error. El backend debe:
+Independientemente de la vida del refresh token en PocketID, el servidor acota
+la sesión:
 
-1. Eliminar el refresh_token de SQLite
-2. Devolver 401 al frontend
-3. El frontend redirige al login de PocketID
+- **Idle timeout** (`SESSION_IDLE_TIMEOUT_SECONDS`, por defecto 1800): sin
+  actividad de usuario explícita, la siguiente petición se rechaza con 401 y la
+  sesión se revoca.
+- **Lifetime absoluto** (`SESSION_ABSOLUTE_TIMEOUT_SECONDS`, por defecto 14400):
+  anclado en el login, no se extiende ni con actividad ni con refresh.
+
+El refresh token de PocketID (30 días) sigue siendo válido a nivel de proveedor,
+pero estos dos límites lo hacen irrelevante en la práctica: la sesión nunca vive
+más de 4 horas. Ver §9.
 
 ### 7.3 Rotación de refresh token
 
@@ -488,15 +503,16 @@ PocketID invalida el refresh_token anterior al emitir uno nuevo. Esto implica:
   debe confirmar la recepción, o el backend debe mantener el token anterior
   como respaldo.
 
-### 7.4 Token en localStorage vs sessionStorage
+### 7.4 Token en sessionStorage y ventana de sesión
 
 | Situación | Comportamiento |
 |---|---|
-| F5 / recargar página | ✅ Funciona (localStorage) |
-| Nueva pestaña | ✅ Funciona (localStorage) |
-| Cerrar y abrir navegador | ✅ Funciona (localStorage) |
-| Token expirado (>1h) | ✅ Refresh automático |
-| Refresh expirado (>30d) | ❌ Login requerido |
+| F5 / recargar página | ✅ Funciona (sessionStorage persiste en la pestaña) |
+| Nueva pestaña | ❌ Requiere login (sessionStorage es por pestaña) |
+| Cerrar y abrir navegador | ❌ Requiere login |
+| Token expirado (>1 h) | ✅ Refresh automático (si la sesión sigue dentro de los límites) |
+| Sin actividad > 30 min | ❌ Login requerido (idle timeout) |
+| Sesión > 4 h | ❌ Login requerido (lifetime absoluto), aunque haya actividad |
 
 ### 7.5 Modo desarrollo (sin OIDC)
 
@@ -514,28 +530,40 @@ if state.jwt_validator.is_dev() {
 
 ---
 
-## 8. Checklist de implementación
+## 8. Estado de la implementación
 
-### Backend
+El patrón descrito está implementado en Populatrs:
 
-- [ ] Añadir campo `refresh_token: Option<String>` a `TokenResponse`
-- [ ] Añadir campo `expires_in: u64` (quitar `#[allow(dead_code)]`)
-- [ ] Crear tabla `refresh_tokens` en SQLite
-- [ ] Implementar `save_refresh_token()`, `get_refresh_token()`, `delete_refresh_token()`
-- [ ] Guardar refresh_token en el callback OIDC (`auth_routes.rs`)
-- [ ] Implementar endpoint `POST /auth/refresh`
-- [ ] Añadir `/auth/refresh` a `is_public_path()` en `main.rs`
-- [ ] Manejar modo dev en `/auth/refresh`
-- [ ] Tests: refresh exitoso, refresh expirado, refresh concurrente
+- **Backend**: captura de `refresh_token`, tabla `refresh_tokens`, `POST /auth/refresh`
+  con rotación (compare-and-swap), `POST /auth/logout` con RP-initiated logout, y los
+  **límites de sesión idle/absoluto** (§9).
+- **Frontend**: token en `sessionStorage`, interceptor 401 con `refreshPromise`
+  compartido, y tracker de actividad para la expiración proactiva.
 
-### Frontend
+Para la política de sesión vigente, ver §9.
 
-- [ ] Guardar token en `localStorage` además de `sessionStorage`
-- [ ] Implementar interceptor 401 con refresh en `http.ts`
-- [ ] Variable `refreshPromise` para evitar refrescos concurrentes
-- [ ] Reintentar petición original tras refresh exitoso
-- [ ] Redirigir a login solo si refresh falla
-- [ ] Tests: refresh exitoso, refresh fallido, concurrencia
+---
+
+## 9. Política de sesión de Populatrs (idle + absoluto)
+
+Además del refresh OIDC, Populatrs aplica una política de sesión
+**autoritativa en el servidor**:
+
+| Límite | Variable | Defecto | Ancla |
+|---|---|---|---|
+| Inactividad | `SESSION_IDLE_TIMEOUT_SECONDS` | 1800 s (30 min) | última actividad explícita |
+| Vida absoluta | `SESSION_ABSOLUTE_TIMEOUT_SECONDS` | 14400 s (4 h) | login (inmutable) |
+| Throttle de actividad | `SESSION_ACTIVITY_THROTTLE_SECONDS` | 60 s | — |
+
+- **Actividad explícita**: solo `POST /auth/activity` reinicia el idle. El sondeo
+  periódico del Dashboard (`GET /api/status`) **no** cuenta como actividad.
+- **Autoridad del servidor**: `require_auth` valida y revoca la sesión en cada
+  petición protegida; `POST /auth/refresh` reaplica ambos límites antes del
+  intercambio y nunca extiende el ancla absoluta.
+- **Expiración proactiva en el cliente**: el hook `useSessionActivity` detecta los
+  límites (que recibe de `GET /api/me`) y devuelve al login sin esperar a un 401.
+- **Sin "recordarme"**: no hay modo de sesión larga.
+- **Modo desarrollo**: sin OIDC la autenticación se omite y estos límites no se aplican.
 
 ---
 

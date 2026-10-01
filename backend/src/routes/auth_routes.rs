@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Extension, Query, State},
     http::{header, StatusCode},
     response::{Html, IntoResponse, Redirect},
     Json,
@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::instrument;
 
-use crate::auth::{AppState, AuthUser};
+use crate::auth::{AppState, AuthUser, OidcMetadata};
+use crate::config::SessionTimeouts;
+use crate::db::Database;
+use crate::middleware::enforce_session_timeouts;
 
 #[derive(Debug, Deserialize)]
 pub struct AuthCallbackQuery {
@@ -32,6 +35,10 @@ pub struct MeResponse {
     pub sub: String,
     pub email: Option<String>,
     pub name: Option<String>,
+    /// Idle timeout in seconds, so the client can mirror the server window.
+    pub idle_seconds: u64,
+    /// Absolute session lifetime in seconds (anchored at login).
+    pub absolute_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -283,6 +290,8 @@ pub async fn callback(
 <body>
 <script>
 sessionStorage.setItem('populatrs_token', '{jwt}');
+sessionStorage.setItem('populatrs_session_start', String(Date.now()));
+sessionStorage.setItem('populatrs_last_activity', String(Date.now()));
 {user_data}
 window.location.href = '/';
 </script>
@@ -324,6 +333,8 @@ pub async fn dev_login(
 <body>
 <script>
 sessionStorage.setItem('populatrs_token', '{jwt}');
+sessionStorage.setItem('populatrs_session_start', String(Date.now()));
+sessionStorage.setItem('populatrs_last_activity', String(Date.now()));
 sessionStorage.setItem('populatrs_user', JSON.stringify({user}));
 window.location.href = '/';
 </script>
@@ -340,12 +351,76 @@ window.location.href = '/';
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
-pub async fn me(axum::Extension(user): axum::Extension<AuthUser>) -> Json<MeResponse> {
+pub async fn me(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+) -> Json<MeResponse> {
     Json(MeResponse {
         sub: user.user_id,
         email: user.email,
         name: user.name,
+        idle_seconds: state.config.session_timeouts.idle_seconds,
+        absolute_seconds: state.config.session_timeouts.absolute_seconds,
     })
+}
+
+/// Record an explicit user-activity signal for the caller's session.
+///
+/// Returns `Ok(true)` when a live session was touched (extending only the idle
+/// window), `Ok(false)` when no session exists or the session has expired (in
+/// which case it is revoked), and `Err` on a storage failure.
+pub async fn record_session_activity(
+    db: &Database,
+    user_id: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    timeouts: &SessionTimeouts,
+) -> anyhow::Result<bool> {
+    let Some(session) = db.get_session(user_id).await? else {
+        return Ok(false);
+    };
+
+    if session.is_expired(now, timeouts.idle_seconds, timeouts.absolute_seconds) {
+        if let Err(e) = db.delete_refresh_token(user_id).await {
+            tracing::warn!(user_id = %user_id, error = %e, "failed to revoke expired session");
+        }
+        return Ok(false);
+    }
+
+    db.touch_activity(user_id, now).await?;
+    Ok(true)
+}
+
+/// Refresh the caller's session activity timestamp.
+///
+/// In dev mode there is no server-side session, so report success (204) to keep
+/// the client-side activity tracker working. Otherwise enforce the timeouts:
+/// `204 NO_CONTENT` when the session is live, `401 UNAUTHORIZED` when it is
+/// missing or expired.
+pub async fn activity(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthUser>,
+) -> StatusCode {
+    if state.jwt_validator.is_dev() {
+        return StatusCode::NO_CONTENT;
+    }
+
+    match record_session_activity(
+        &state.db,
+        &user.user_id,
+        chrono::Utc::now(),
+        &state.config.session_timeouts,
+    )
+    .await
+    {
+        Ok(true) => StatusCode::NO_CONTENT,
+        Ok(false) => StatusCode::UNAUTHORIZED,
+        Err(e) => {
+            // A transient storage failure must not force a logout. Mirror
+            // `enforce_session_timeouts`: surface a 500 so the client retries.
+            tracing::warn!(user_id = %user.user_id, error = %e, "failed to record session activity");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -364,7 +439,7 @@ pub struct RefreshResponse {
 /// 5. Devuelve el nuevo access_token
 ///
 /// En modo dev (sin OIDC), devuelve un token de desarrollo.
-#[instrument(skip(state))]
+#[instrument(skip(state, headers))]
 pub async fn refresh_token(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
@@ -394,6 +469,17 @@ pub async fn refresh_token(
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
     let user_id = claims.sub;
+
+    // Guard the refresh path with the server-authoritative session timeouts.
+    // Must run before the provider exchange so an expired session cannot mint a
+    // new token. Never resets `created_at`, so absolute lifetime is not extended.
+    enforce_session_timeouts(
+        &state.db,
+        &user_id,
+        chrono::Utc::now(),
+        &state.config.session_timeouts,
+    )
+    .await?;
 
     // 1. Obtener refresh_token de SQLite
     let refresh_token = state
@@ -429,26 +515,44 @@ pub async fn refresh_token(
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
     if !resp.status().is_success() {
-        // Only delete if the stored token is the one we just failed with
-        // (avoids deleting a freshly rotated token from a concurrent request)
-        if let Ok(Some(stored)) = state.db.get_refresh_token(&user_id).await {
-            if stored == refresh_token {
-                state.db.delete_refresh_token(&user_id).await.ok();
-            }
-        }
+        // Do NOT delete the stored token here. The compare-and-swap below is the
+        // only owner of rotation, and logout deletes explicitly. Deleting on a
+        // failed exchange could kill a concurrent refresh that already succeeded:
+        // with two concurrent refreshes A and B reading R, if A exchanges
+        // successfully and B fails, B deleting R would make A's CAS fail and
+        // return 401, ending a session that was just renewed. An invalid token is
+        // overwritten on the next login and expires on its own.
         return Err(StatusCode::UNAUTHORIZED);
     }
 
     let token_data: TokenResponse = resp.json().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
 
-    // 3. Guardar nuevo refresh_token (rotación)
-    if let Some(new_refresh) = &token_data.refresh_token {
-        state
-            .db
-            .save_refresh_token(&user_id, new_refresh, token_data.expires_in)
-            .await
-            .map_err(|e| tracing::warn!("Failed to save refresh token: {}", e))
-            .ok();
+    // 3. Persist the rotated refresh token (compare-and-swap). This runs on every
+    //    successful exchange, even when the provider returns no new refresh token,
+    //    so a concurrent logout that removed the row always rejects the request.
+    //    If logout removed the row or a concurrent refresh rotated it, the CAS
+    //    returns false and we reject with 401.
+    let persisted = persist_rotated_token(
+        &state.db,
+        &user_id,
+        &refresh_token,
+        token_data.refresh_token.as_deref(),
+        token_data.expires_in,
+    )
+    .await
+    .map_err(|e| {
+        // A database failure (lock, disk) is transient, not an expired session.
+        // Map it to 500 so the client retries instead of clearing the token and
+        // forcing a logout. Only a failed CAS (`persisted == false`) means 401.
+        tracing::warn!("Failed to save refresh token: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if !persisted {
+        tracing::warn!(
+            user_id = %user_id,
+            "refresh rotation rejected: stored token changed or was revoked"
+        );
+        return Err(StatusCode::UNAUTHORIZED);
     }
 
     // 4. Devolver nuevo access_token
@@ -456,6 +560,33 @@ pub async fn refresh_token(
         access_token: token_data.access_token,
         expires_in: token_data.expires_in,
     }))
+}
+
+/// Persist the refresh token after a successful exchange (rotation).
+///
+/// Always performs a compare-and-swap against the token that was read before
+/// the exchange, so a concurrent logout (which deletes the row) or a concurrent
+/// refresh (which rotates it) wins over this request.
+///
+/// When the provider returns a new refresh token it is stored; otherwise the
+/// same token is re-saved with a renewed expiry, which still verifies that the
+/// row was not removed concurrently.
+///
+/// Returns `Ok(true)` when the row was updated, `Ok(false)` when the stored
+/// token changed or was removed, and `Err` on a database failure.
+async fn persist_rotated_token(
+    db: &Database,
+    user_id: &str,
+    old_token: &str,
+    new_token: Option<&str>,
+    expires_in: u64,
+) -> anyhow::Result<bool> {
+    // When the provider does not issue a new refresh token, re-save the same
+    // one with a renewed expiry. The CAS still verifies the row is current, so
+    // a concurrent logout or rotation is not resurrected.
+    let token_to_store = new_token.unwrap_or(old_token);
+    db.save_refresh_token_if_current(user_id, old_token, token_to_store, expires_in)
+        .await
 }
 
 /// Extrae el `sub` de un JWT sin verificar la firma.
@@ -474,9 +605,128 @@ fn extract_sub_from_jwt(token: &str) -> Option<String> {
     claims.get("sub")?.as_str().map(|s| s.to_string())
 }
 
+#[derive(Debug, Serialize)]
+pub struct LogoutResponse {
+    pub end_session_url: Option<String>,
+}
+
+/// Build the RP-initiated logout URL by appending `client_id` and, when
+/// available, `post_logout_redirect_uri` to the provider's
+/// `end_session_endpoint`.
+///
+/// Fails closed: returns `None` when the endpoint is not a valid absolute URL
+/// or its scheme is not `http`/`https`. Any query parameters already present on
+/// the endpoint are preserved.
+pub fn build_end_session_url(
+    endpoint: &str,
+    client_id: &str,
+    post_logout_redirect_uri: Option<&str>,
+) -> Option<String> {
+    let mut url = url::Url::parse(endpoint).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.append_pair("client_id", client_id);
+        if let Some(redirect) = post_logout_redirect_uri {
+            pairs.append_pair("post_logout_redirect_uri", redirect);
+        }
+    }
+    Some(url.to_string())
+}
+
+/// Derive the post-logout redirect URI from the OIDC redirect URL by keeping
+/// its origin and pointing at `/login`.
+///
+/// Returns `None` when `redirect_url` is not a valid absolute URL.
+pub fn derive_post_logout_redirect_uri(redirect_url: &str) -> Option<String> {
+    let url = url::Url::parse(redirect_url).ok()?;
+    let origin = url.origin().ascii_serialization();
+    if origin == "null" {
+        return None;
+    }
+    Some(format!("{}/login", origin.trim_end_matches('/')))
+}
+
+/// Revoke the user's server-side refresh token and build the logout response.
+///
+/// Extracted from the `logout` handler so it can be tested without constructing
+/// a full `AppState` / real JWT validator. A storage error is logged but never
+/// fails the logout.
+async fn revoke_and_build_logout(
+    db: &Database,
+    sub: &str,
+    metadata: Option<&OidcMetadata>,
+    client_id: &str,
+    redirect_url: Option<&str>,
+) -> LogoutResponse {
+    if let Err(e) = db.delete_refresh_token(sub).await {
+        tracing::warn!("Failed to delete refresh token on logout: {}", e);
+    }
+
+    let end_session_url = metadata
+        .and_then(|m| m.end_session_endpoint.as_deref())
+        .and_then(|endpoint| {
+            let post_logout_redirect_uri = redirect_url.and_then(derive_post_logout_redirect_uri);
+            build_end_session_url(endpoint, client_id, post_logout_redirect_uri.as_deref())
+        });
+
+    LogoutResponse { end_session_url }
+}
+
+/// Terminate the session: revoke the caller's server-side refresh token and,
+/// when the provider advertises an `end_session_endpoint`, return the
+/// RP-initiated logout URL for the client to redirect to.
+///
+/// The bearer token is validated ignoring expiration so logout still works with
+/// an expired access token (the refresh token must not survive).
+#[instrument(skip(state, headers))]
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<LogoutResponse>, StatusCode> {
+    // Dev mode has no server-side session to revoke.
+    if state.jwt_validator.is_dev() {
+        return Ok(Json(LogoutResponse {
+            end_session_url: None,
+        }));
+    }
+
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let claims = state
+        .jwt_validator
+        .validate_token_ignore_expiry(token)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let client_id = state.config.oidc_client_id.as_deref().unwrap_or("");
+    let response = revoke_and_build_logout(
+        &state.db,
+        &claims.sub,
+        state.oidc_metadata.as_ref(),
+        client_id,
+        state.config.oidc_redirect_url.as_deref(),
+    )
+    .await;
+
+    Ok(Json(response))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SessionTimeouts;
+    use crate::middleware::enforce_session_timeouts;
+    use chrono::Utc;
 
     // ── AuthCallbackQuery deserialization ──
 
@@ -535,11 +785,15 @@ mod tests {
             sub: "user123".into(),
             email: Some("user@test.com".into()),
             name: Some("Test User".into()),
+            idle_seconds: 1800,
+            absolute_seconds: 14400,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["sub"], "user123");
         assert_eq!(json["email"], "user@test.com");
         assert_eq!(json["name"], "Test User");
+        assert_eq!(json["idle_seconds"], 1800);
+        assert_eq!(json["absolute_seconds"], 14400);
     }
 
     #[test]
@@ -548,6 +802,8 @@ mod tests {
             sub: "anon".into(),
             email: None,
             name: None,
+            idle_seconds: 1800,
+            absolute_seconds: 14400,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["sub"], "anon");
@@ -709,5 +965,470 @@ mod tests {
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("code_challenge=test-challenge-value"));
         assert!(url.starts_with("https://pocketid.example.com/authorize?"));
+    }
+
+    // ── LogoutResponse serialization ──
+
+    #[test]
+    fn test_logout_response_with_end_session_url() {
+        let resp = LogoutResponse {
+            end_session_url: Some("https://idp.example.com/logout".into()),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["end_session_url"], "https://idp.example.com/logout");
+    }
+
+    #[test]
+    fn test_logout_response_without_end_session_url() {
+        let resp = LogoutResponse {
+            end_session_url: None,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert!(json["end_session_url"].is_null());
+    }
+
+    // ── build_end_session_url ──
+
+    #[test]
+    fn test_build_end_session_url_appends_params() {
+        let url = build_end_session_url(
+            "https://idp.example.com/logout",
+            "populatrs",
+            Some("https://app.example.com/login"),
+        )
+        .expect("valid https endpoint should build");
+        assert!(url.starts_with("https://idp.example.com/logout?"));
+        assert!(url.contains("client_id=populatrs"));
+        // post_logout_redirect_uri must be URL-encoded
+        assert!(url.contains("post_logout_redirect_uri=https%3A%2F%2Fapp.example.com%2Flogin"));
+    }
+
+    #[test]
+    fn test_build_end_session_url_preserves_existing_query() {
+        let url = build_end_session_url(
+            "https://idp.example.com/logout?foo=bar",
+            "populatrs",
+            Some("https://app.example.com/login"),
+        )
+        .expect("valid https endpoint should build");
+        assert!(url.contains("foo=bar"));
+        assert!(url.contains("client_id=populatrs"));
+        assert!(url.contains("post_logout_redirect_uri=https%3A%2F%2Fapp.example.com%2Flogin"));
+    }
+
+    #[test]
+    fn test_build_end_session_url_omits_redirect_when_none() {
+        let url = build_end_session_url("https://idp.example.com/logout", "populatrs", None)
+            .expect("valid https endpoint should build");
+        assert!(url.contains("client_id=populatrs"));
+        assert!(!url.contains("post_logout_redirect_uri"));
+    }
+
+    #[test]
+    fn test_build_end_session_url_rejects_protocol_relative() {
+        assert!(build_end_session_url("//evil.com/logout", "populatrs", None).is_none());
+    }
+
+    #[test]
+    fn test_build_end_session_url_rejects_javascript_scheme() {
+        assert!(build_end_session_url("javascript:alert(1)", "populatrs", None).is_none());
+    }
+
+    #[test]
+    fn test_build_end_session_url_rejects_unparseable() {
+        assert!(build_end_session_url("not a url", "populatrs", None).is_none());
+    }
+
+    // ── derive_post_logout_redirect_uri ──
+
+    #[test]
+    fn test_derive_post_logout_redirect_uri_from_callback() {
+        let derived = derive_post_logout_redirect_uri("https://app.example.com/auth/callback");
+        assert_eq!(derived.as_deref(), Some("https://app.example.com/login"));
+    }
+
+    #[test]
+    fn test_derive_post_logout_redirect_uri_preserves_port() {
+        let derived = derive_post_logout_redirect_uri("http://localhost:3044/auth/callback");
+        assert_eq!(derived.as_deref(), Some("http://localhost:3044/login"));
+    }
+
+    #[test]
+    fn test_derive_post_logout_redirect_uri_invalid_returns_none() {
+        assert!(derive_post_logout_redirect_uri("not a url").is_none());
+        assert!(derive_post_logout_redirect_uri("").is_none());
+    }
+
+    // ── revoke_and_build_logout (logout handler core) ──
+
+    async fn test_db() -> (Database, tempfile::TempDir) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test.db");
+        let db = Database::open(&path).await.unwrap();
+        (db, dir)
+    }
+
+    fn metadata_with_endpoint(endpoint: Option<&str>) -> OidcMetadata {
+        OidcMetadata {
+            issuer: "https://idp.example.com".into(),
+            authorization_endpoint: Some("https://idp.example.com/authorize".into()),
+            token_endpoint: Some("https://idp.example.com/token".into()),
+            userinfo_endpoint: Some("https://idp.example.com/userinfo".into()),
+            jwks_uri: Some("https://idp.example.com/jwks".into()),
+            end_session_endpoint: endpoint.map(|s| s.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_revoke_and_build_logout_deletes_token_and_returns_url() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-1", "refresh-tok", 3600)
+            .await
+            .unwrap();
+        let meta = metadata_with_endpoint(Some("https://idp.example.com/logout"));
+
+        let resp = revoke_and_build_logout(
+            &db,
+            "user-1",
+            Some(&meta),
+            "populatrs",
+            Some("https://app.example.com/auth/callback"),
+        )
+        .await;
+
+        // Row revoked from storage.
+        assert!(db.get_refresh_token("user-1").await.unwrap().is_none());
+        // URL built with encoded post-logout redirect.
+        let url = resp
+            .end_session_url
+            .expect("end_session_url should be present");
+        assert!(url.contains("client_id=populatrs"));
+        assert!(url.contains("post_logout_redirect_uri=https%3A%2F%2Fapp.example.com%2Flogin"));
+    }
+
+    #[tokio::test]
+    async fn test_revoke_and_build_logout_without_endpoint_returns_none() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-2", "refresh-tok", 3600)
+            .await
+            .unwrap();
+        let meta = metadata_with_endpoint(None);
+
+        let resp = revoke_and_build_logout(
+            &db,
+            "user-2",
+            Some(&meta),
+            "populatrs",
+            Some("https://app.example.com/auth/callback"),
+        )
+        .await;
+
+        assert!(resp.end_session_url.is_none());
+        // Token is still revoked even without a provider endpoint.
+        assert!(db.get_refresh_token("user-2").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_revoke_and_build_logout_no_stored_token_is_idempotent() {
+        let (db, _dir) = test_db().await;
+        let meta = metadata_with_endpoint(Some("https://idp.example.com/logout"));
+
+        let resp = revoke_and_build_logout(
+            &db,
+            "ghost-user",
+            Some(&meta),
+            "populatrs",
+            Some("https://app.example.com/auth/callback"),
+        )
+        .await;
+
+        // No stored token: must not error, and the URL is still built.
+        assert!(resp.end_session_url.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_revoke_and_build_logout_omits_underivable_redirect() {
+        let (db, _dir) = test_db().await;
+        let meta = metadata_with_endpoint(Some("https://idp.example.com/logout"));
+
+        let resp =
+            revoke_and_build_logout(&db, "user-3", Some(&meta), "populatrs", Some("not a url"))
+                .await;
+
+        let url = resp
+            .end_session_url
+            .expect("end_session_url should be present");
+        assert!(url.contains("client_id=populatrs"));
+        // Underivable redirect must be omitted, not passed through raw.
+        assert!(!url.contains("post_logout_redirect_uri"));
+    }
+
+    #[tokio::test]
+    async fn test_revoke_and_build_logout_malformed_endpoint_returns_none() {
+        let (db, _dir) = test_db().await;
+        let meta = metadata_with_endpoint(Some("javascript:alert(1)"));
+
+        let resp = revoke_and_build_logout(
+            &db,
+            "user-4",
+            Some(&meta),
+            "populatrs",
+            Some("https://app.example.com/auth/callback"),
+        )
+        .await;
+
+        assert!(resp.end_session_url.is_none());
+    }
+
+    // ── Logout-during-refresh race (storage level) ──
+
+    #[tokio::test]
+    async fn test_refresh_rotation_not_persisted_when_logout_removes_token() {
+        let (db, _dir) = test_db().await;
+        // A refresh token is stored for the user.
+        db.save_refresh_token("user-race", "original-token", 3600)
+            .await
+            .unwrap();
+
+        // The refresh exchange reads the stored token...
+        let read_token = db
+            .get_refresh_token("user-race")
+            .await
+            .unwrap()
+            .expect("token should be stored");
+
+        // ...then logout removes it before the rotation is persisted.
+        db.delete_refresh_token("user-race").await.unwrap();
+
+        // The compare-and-swap rotation must not resurrect the revoked session.
+        let persisted = db
+            .save_refresh_token_if_current("user-race", &read_token, "rotated-token", 3600)
+            .await
+            .unwrap();
+
+        assert!(!persisted);
+        assert!(db.get_refresh_token("user-race").await.unwrap().is_none());
+    }
+
+    // ── persist_rotated_token (post-exchange persistence decision) ──
+
+    #[tokio::test]
+    async fn test_persist_rotated_token_with_new_token_returns_true() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-persist-1", "old-token", 3600)
+            .await
+            .unwrap();
+
+        let persisted =
+            persist_rotated_token(&db, "user-persist-1", "old-token", Some("new-token"), 3600)
+                .await
+                .unwrap();
+
+        assert!(persisted);
+        assert_eq!(
+            db.get_refresh_token("user-persist-1")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("new-token")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_persist_rotated_token_without_new_token_resaves_same() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-persist-2", "same-token", 3600)
+            .await
+            .unwrap();
+
+        let persisted = persist_rotated_token(&db, "user-persist-2", "same-token", None, 3600)
+            .await
+            .unwrap();
+
+        assert!(persisted);
+        assert_eq!(
+            db.get_refresh_token("user-persist-2")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("same-token")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_persist_rotated_token_returns_false_when_row_removed() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-persist-3", "old-token", 3600)
+            .await
+            .unwrap();
+        db.delete_refresh_token("user-persist-3").await.unwrap();
+
+        let persisted =
+            persist_rotated_token(&db, "user-persist-3", "old-token", Some("new-token"), 3600)
+                .await
+                .unwrap();
+
+        assert!(!persisted);
+        assert!(db
+            .get_refresh_token("user-persist-3")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_persist_rotated_token_without_new_token_returns_false_when_row_removed() {
+        let (db, _dir) = test_db().await;
+        db.save_refresh_token("user-persist-4", "old-token", 3600)
+            .await
+            .unwrap();
+        db.delete_refresh_token("user-persist-4").await.unwrap();
+
+        // The provider issued no new refresh token, so the same token is re-saved.
+        // The CAS must still reject because the row was revoked concurrently.
+        let persisted = persist_rotated_token(&db, "user-persist-4", "old-token", None, 3600)
+            .await
+            .unwrap();
+
+        assert!(!persisted);
+        assert!(db
+            .get_refresh_token("user-persist-4")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    // ── Session activity signal ──
+
+    #[tokio::test]
+    async fn test_record_activity_valid_session_updates_timestamp() {
+        let (db, _dir) = test_db().await;
+        let t0 = Utc::now() - chrono::Duration::minutes(5);
+        db.create_session("user-act", "tok", 3600, t0)
+            .await
+            .unwrap();
+
+        let now = Utc::now();
+        let ok = record_session_activity(&db, "user-act", now, &SessionTimeouts::default())
+            .await
+            .unwrap();
+        assert!(ok);
+
+        let session = db.get_session("user-act").await.unwrap().unwrap();
+        assert_eq!(session.last_activity_at, now.to_rfc3339());
+        assert_eq!(session.created_at, t0.to_rfc3339());
+    }
+
+    #[tokio::test]
+    async fn test_record_activity_idle_expired_returns_false_and_revokes() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-act-idle",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(1801),
+        )
+        .await
+        .unwrap();
+
+        let ok = record_session_activity(&db, "user-act-idle", now, &SessionTimeouts::default())
+            .await
+            .unwrap();
+        assert!(!ok);
+        assert!(db.get_session("user-act-idle").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_record_activity_absolute_expired_returns_false_and_revokes() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-act-abs",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(14401),
+        )
+        .await
+        .unwrap();
+        db.touch_activity("user-act-abs", now).await.unwrap();
+
+        let ok = record_session_activity(&db, "user-act-abs", now, &SessionTimeouts::default())
+            .await
+            .unwrap();
+        assert!(!ok);
+        assert!(db.get_session("user-act-abs").await.unwrap().is_none());
+    }
+
+    // ── Refresh session limits ──
+
+    #[tokio::test]
+    async fn test_refresh_guard_within_limits_passes_and_rotation_keeps_created_at() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session("user-refresh", "old-token", 3600, now)
+            .await
+            .unwrap();
+        let created_before = db
+            .get_session("user-refresh")
+            .await
+            .unwrap()
+            .unwrap()
+            .created_at;
+
+        let guard =
+            enforce_session_timeouts(&db, "user-refresh", now, &SessionTimeouts::default()).await;
+        assert_eq!(guard, Ok(()));
+
+        let persisted =
+            persist_rotated_token(&db, "user-refresh", "old-token", Some("new-token"), 3600)
+                .await
+                .unwrap();
+        assert!(persisted);
+
+        let session = db.get_session("user-refresh").await.unwrap().unwrap();
+        assert_eq!(session.refresh_token, "new-token");
+        assert_eq!(session.created_at, created_before);
+    }
+
+    #[tokio::test]
+    async fn test_refresh_guard_idle_expired_revokes_and_rejects() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-refresh-idle",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(1801),
+        )
+        .await
+        .unwrap();
+
+        let guard =
+            enforce_session_timeouts(&db, "user-refresh-idle", now, &SessionTimeouts::default())
+                .await;
+        assert_eq!(guard, Err(StatusCode::UNAUTHORIZED));
+        assert!(db.get_session("user-refresh-idle").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_refresh_guard_absolute_expired_revokes_even_with_recent_activity() {
+        let (db, _dir) = test_db().await;
+        let now = Utc::now();
+        db.create_session(
+            "user-refresh-abs",
+            "tok",
+            3600,
+            now - chrono::Duration::seconds(14401),
+        )
+        .await
+        .unwrap();
+        db.touch_activity("user-refresh-abs", now).await.unwrap();
+
+        let guard =
+            enforce_session_timeouts(&db, "user-refresh-abs", now, &SessionTimeouts::default())
+                .await;
+        assert_eq!(guard, Err(StatusCode::UNAUTHORIZED));
+        assert!(db.get_session("user-refresh-abs").await.unwrap().is_none());
     }
 }

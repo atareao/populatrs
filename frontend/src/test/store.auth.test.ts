@@ -1,10 +1,44 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { getToken, setToken, clearToken } from "../store/auth";
+import {
+  getToken,
+  setToken,
+  clearToken,
+  isTokenValid,
+  hasValidSession,
+  isSessionWindowValid,
+  getSessionGeneration,
+  startSession,
+  recordActivity,
+  getSessionStart,
+  getLastActivity,
+  setSessionLimits,
+  resetSessionLimits,
+  getSessionIdleLimit,
+  getSessionAbsoluteLimit,
+  SESSION_IDLE_TIMEOUT_SECONDS,
+  SESSION_ABSOLUTE_TIMEOUT_SECONDS,
+} from "../store/auth";
+
+// --- JWT helpers -----------------------------------------------------------
+// Build unsigned JWTs (header.payload.) with a base64url-encoded payload.
+// No signature is needed: the client only decodes the payload to read `exp`.
+function base64url(input: string): string {
+  return btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const header = base64url(JSON.stringify({ alg: "none", typ: "JWT" }));
+  const body = base64url(JSON.stringify(payload));
+  return `${header}.${body}.`;
+}
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 describe("store/auth", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    resetSessionLimits();
   });
 
   it("returns null when no token is stored", () => {
@@ -16,10 +50,10 @@ describe("store/auth", () => {
     expect(getToken()).toBe("test-token-123");
   });
 
-  it("stores in both sessionStorage and localStorage", () => {
-    setToken("token-dual");
-    expect(sessionStorage.getItem("populatrs_token")).toBe("token-dual");
-    expect(localStorage.getItem("populatrs_token")).toBe("token-dual");
+  it("stores in sessionStorage only", () => {
+    setToken("token-session");
+    expect(sessionStorage.getItem("populatrs_token")).toBe("token-session");
+    expect(localStorage.getItem("populatrs_token")).toBeNull();
   });
 
   it("clears the token", () => {
@@ -33,6 +67,21 @@ describe("store/auth", () => {
     clearToken();
     expect(sessionStorage.getItem("populatrs_token")).toBeNull();
     expect(localStorage.getItem("populatrs_token")).toBeNull();
+  });
+
+  describe("getSessionGeneration", () => {
+    it("increments the session generation when the token is cleared", () => {
+      const before = getSessionGeneration();
+      clearToken();
+      expect(getSessionGeneration()).toBe(before + 1);
+    });
+
+    it("increments on every clear, even when no token is stored", () => {
+      const before = getSessionGeneration();
+      clearToken();
+      clearToken();
+      expect(getSessionGeneration()).toBe(before + 2);
+    });
   });
 
   it("prefers sessionStorage over localStorage", () => {
@@ -58,5 +107,257 @@ describe("store/auth", () => {
     expect(() => getToken()).not.toThrow();
 
     Storage.prototype.setItem = originalSetItem;
+  });
+
+  describe("isTokenValid", () => {
+    it("returns true for a JWT whose exp is in the future", () => {
+      expect(isTokenValid(makeJwt({ exp: nowSeconds() + 3600 }))).toBe(true);
+    });
+
+    it("returns false for a JWT whose exp is in the past", () => {
+      expect(isTokenValid(makeJwt({ exp: nowSeconds() - 3600 }))).toBe(false);
+    });
+
+    it("returns false for a malformed token", () => {
+      expect(isTokenValid("not-a-jwt")).toBe(false);
+    });
+
+    it("returns false for null", () => {
+      expect(isTokenValid(null)).toBe(false);
+    });
+
+    it("returns false for an empty string", () => {
+      expect(isTokenValid("")).toBe(false);
+    });
+
+    it("returns false when the payload has no exp claim", () => {
+      expect(isTokenValid(makeJwt({ sub: "user" }))).toBe(false);
+    });
+
+    it("treats a token expiring within the skew window as valid", () => {
+      expect(isTokenValid(makeJwt({ exp: nowSeconds() - 10 }))).toBe(true);
+    });
+
+    it("treats a token expired beyond the skew window as invalid", () => {
+      expect(isTokenValid(makeJwt({ exp: nowSeconds() - 60 }))).toBe(false);
+    });
+
+    it("treats a token expiring shortly in the future as valid", () => {
+      expect(isTokenValid(makeJwt({ exp: nowSeconds() + 10 }))).toBe(true);
+    });
+
+    it("returns false for a token with only two segments", () => {
+      const twoSegments = makeJwt({ exp: nowSeconds() + 3600 }).replace(/\.$/, "");
+      expect(isTokenValid(twoSegments)).toBe(false);
+    });
+
+    it("returns false for a token with four segments", () => {
+      const fourSegments = makeJwt({ exp: nowSeconds() + 3600 }) + "sig.extra";
+      expect(isTokenValid(fourSegments)).toBe(false);
+    });
+
+    it("decodes a payload whose standard base64 contains + and /", () => {
+      const plusPayload = { exp: nowSeconds() + 3600, pad: " >" };
+      const slashPayload = { exp: nowSeconds() + 3600, pad: " ?" };
+
+      // Sanity: these payloads really exercise the base64url conversion.
+      expect(btoa(JSON.stringify(plusPayload))).toContain("+");
+      expect(btoa(JSON.stringify(slashPayload))).toContain("/");
+
+      expect(isTokenValid(makeJwt(plusPayload))).toBe(true);
+      expect(isTokenValid(makeJwt(slashPayload))).toBe(true);
+    });
+  });
+
+  describe("hasValidSession", () => {
+    it("returns true only when a valid token is stored", () => {
+      setToken(makeJwt({ exp: nowSeconds() + 3600 }));
+      expect(hasValidSession()).toBe(true);
+    });
+
+    it("returns false when the stored token is expired", () => {
+      setToken(makeJwt({ exp: nowSeconds() - 3600 }));
+      expect(hasValidSession()).toBe(false);
+    });
+
+    it("returns false when no token is stored", () => {
+      expect(hasValidSession()).toBe(false);
+    });
+  });
+
+  describe("getToken", () => {
+    it("returns the raw token even when it is expired", () => {
+      const expired = makeJwt({ exp: nowSeconds() - 3600 });
+      setToken(expired);
+      expect(getToken()).toBe(expired);
+    });
+  });
+
+  describe("setToken", () => {
+    it("writes to sessionStorage and not to localStorage", () => {
+      setToken("session-only");
+      expect(sessionStorage.getItem("populatrs_token")).toBe("session-only");
+      expect(localStorage.getItem("populatrs_token")).toBeNull();
+    });
+  });
+
+  describe("session window storage", () => {
+    it("returns null for both timestamps when nothing is recorded", () => {
+      expect(getSessionStart()).toBeNull();
+      expect(getLastActivity()).toBeNull();
+    });
+
+    it("records the session start and the last activity at login", () => {
+      startSession(1_000_000);
+      expect(getSessionStart()).toBe(1_000_000);
+      expect(getLastActivity()).toBe(1_000_000);
+    });
+
+    it("updates only the last activity on recordActivity", () => {
+      startSession(1_000_000);
+      recordActivity(2_000_000);
+      expect(getSessionStart()).toBe(1_000_000);
+      expect(getLastActivity()).toBe(2_000_000);
+    });
+
+    it("does not move the session start when recording activity", () => {
+      startSession(1_000_000);
+      recordActivity(5_000_000);
+      recordActivity(9_000_000);
+      expect(getSessionStart()).toBe(1_000_000);
+      expect(getLastActivity()).toBe(9_000_000);
+    });
+
+    it("stores the window in sessionStorage only", () => {
+      startSession(1_000_000);
+      recordActivity(2_000_000);
+      expect(sessionStorage.getItem("populatrs_session_start")).toBe("1000000");
+      expect(sessionStorage.getItem("populatrs_last_activity")).toBe("2000000");
+      expect(localStorage.length).toBe(0);
+    });
+
+    it("clears the session window when the token is cleared", () => {
+      startSession(1_000_000);
+      recordActivity(2_000_000);
+      clearToken();
+      expect(getSessionStart()).toBeNull();
+      expect(getLastActivity()).toBeNull();
+    });
+  });
+
+  describe("session window validity", () => {
+    const idleMs = SESSION_IDLE_TIMEOUT_SECONDS * 1000;
+    const absoluteMs = SESSION_ABSOLUTE_TIMEOUT_SECONDS * 1000;
+
+    it("is valid when both timestamps are within their windows", () => {
+      const now = Date.now();
+      startSession(now);
+      recordActivity(now);
+      expect(isSessionWindowValid()).toBe(true);
+    });
+
+    it("is invalid when the last activity is older than the idle timeout", () => {
+      const now = Date.now();
+      startSession(now);
+      recordActivity(now - idleMs - 60_000);
+      expect(isSessionWindowValid()).toBe(false);
+    });
+
+    it("is invalid when the session start is older than the absolute lifetime", () => {
+      const now = Date.now();
+      startSession(now - absoluteMs - 60_000);
+      recordActivity(now);
+      expect(isSessionWindowValid()).toBe(false);
+    });
+
+    it("is valid when no window has been tracked yet", () => {
+      expect(isSessionWindowValid()).toBe(true);
+    });
+  });
+
+  describe("hasValidSession with the session window", () => {
+    const idleMs = SESSION_IDLE_TIMEOUT_SECONDS * 1000;
+    const absoluteMs = SESSION_ABSOLUTE_TIMEOUT_SECONDS * 1000;
+
+    it("reports invalid when the stored JWT has not expired but the idle window has passed", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() + 3600 }));
+      startSession(now);
+      recordActivity(now - idleMs - 60_000);
+      expect(hasValidSession()).toBe(false);
+    });
+
+    it("reports invalid when the stored JWT has not expired but the absolute lifetime has passed", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() + 3600 }));
+      startSession(now - absoluteMs - 60_000);
+      recordActivity(now);
+      expect(hasValidSession()).toBe(false);
+    });
+
+    it("reports valid when the JWT is unexpired and both windows are fresh", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() + 3600 }));
+      startSession(now);
+      recordActivity(now);
+      expect(hasValidSession()).toBe(true);
+    });
+
+    it("reports invalid when the JWT is expired even if the window is fresh", () => {
+      const now = Date.now();
+      setToken(makeJwt({ exp: nowSeconds() - 3600 }));
+      startSession(now);
+      recordActivity(now);
+      expect(hasValidSession()).toBe(false);
+    });
+  });
+
+  describe("setSessionLimits", () => {
+    it("uses the built-in defaults before any server limits are applied", () => {
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS);
+    });
+
+    it("keeps a window valid under a raised server idle limit that the default would reject", () => {
+      const now = Date.now();
+      // Inactive for 60 s beyond the default idle limit: invalid by default.
+      startSession(now);
+      recordActivity(now - (SESSION_IDLE_TIMEOUT_SECONDS + 60) * 1000);
+      expect(isSessionWindowValid(now)).toBe(false);
+
+      // The operator configured a longer idle limit: the same window is valid.
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS * 4, SESSION_ABSOLUTE_TIMEOUT_SECONDS);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 4);
+      expect(isSessionWindowValid(now)).toBe(true);
+    });
+
+    it("keeps a window valid under a raised server absolute limit", () => {
+      const now = Date.now();
+      startSession(now - (SESSION_ABSOLUTE_TIMEOUT_SECONDS + 60) * 1000);
+      recordActivity(now);
+      expect(isSessionWindowValid(now)).toBe(false);
+
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS, SESSION_ABSOLUTE_TIMEOUT_SECONDS * 2);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS * 2);
+      expect(isSessionWindowValid(now)).toBe(true);
+    });
+
+    it("ignores non-finite and non-positive values, keeping the previous limit", () => {
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS * 3, SESSION_ABSOLUTE_TIMEOUT_SECONDS * 3);
+
+      setSessionLimits(Number.NaN, 0);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 3);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS * 3);
+
+      setSessionLimits(Infinity, -10);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 3);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS * 3);
+    });
+
+    it("accepts a partial update and leaves the other limit untouched", () => {
+      setSessionLimits(SESSION_IDLE_TIMEOUT_SECONDS * 5, undefined);
+      expect(getSessionIdleLimit()).toBe(SESSION_IDLE_TIMEOUT_SECONDS * 5);
+      expect(getSessionAbsoluteLimit()).toBe(SESSION_ABSOLUTE_TIMEOUT_SECONDS);
+    });
   });
 });
