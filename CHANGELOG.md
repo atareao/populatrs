@@ -1,4 +1,28 @@
 # Changelog
+## [0.4.21] - 2026-10-01
+
+### Bug Fixes
+
+- *(auth)* Terminate OIDC sessions and block logout/refresh race
+
+### Documentation
+
+- Update OIDC guide and archive session-timeout specs
+
+### Features
+
+- *(auth)* Enforce idle and absolute session timeouts
+
+### Miscellaneous Tasks
+
+- Remove dead SSE infrastructure
+- Remove dead SSE infrastructure
+- Release v0.4.20 — remove dead SSE infrastructure
+
+### Other
+
+- Dedup migration — never to be used
+- Dedup recovery migration — never to be used
 ## [0.4.20] - 2026-09-22
 
 ### Documentation
@@ -10,6 +34,10 @@
 
 - Dedup-table — permanent dedup records, fix pagination bug
 - Dedup-table — permanent dedup records, fix pagination bug
+
+### Miscellaneous Tasks
+
+- Release v0.4.20
 
 ### Other
 
