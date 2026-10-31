@@ -43,6 +43,14 @@
 [OPENSPEC - ARCHIVE] Archiving change into openspec/specs/.
 ```
 
+## Git Flow
+
+Este proyecto sigue **Git Flow** estricto. Ver [GIT_FLOW.md](./GIT_FLOW.md):
+
+- Estructura de ramas: `main`, `development`, `feature/*`, `hotfix/*`.
+- Conventional commits con **gitmoji**.
+- Cómo crear features, hotfixes y releases.
+
 ## Dónde está el resto
 
 | Tema | Fichero |
