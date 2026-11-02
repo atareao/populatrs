@@ -1,4 +1,14 @@
 # Changelog
+## [0.4.22] - 2026-11-02
+
+### Bug Fixes
+
+- *(ci)* Silencia clippy::double_must_use de async_trait (Rust 1.99)
+
+### Documentation
+
+- *(agents)* Poda del AGENTS.md (−72,6 %) y extracción del detalle a docs/
+- *(agents)* Añade la sección Git Flow
 ## [0.4.21] - 2026-10-01
 
 ### Bug Fixes
@@ -18,6 +28,7 @@
 - Remove dead SSE infrastructure
 - Remove dead SSE infrastructure
 - Release v0.4.20 — remove dead SSE infrastructure
+- Release v0.4.21
 
 ### Other
 
