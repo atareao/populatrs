@@ -27,6 +27,8 @@ pub use telegram::TelegramPublisher;
 pub use threads::ThreadsPublisher;
 pub use x::XPublisher;
 
+// Falso positivo de `async_trait` (lint nuevo de Rust 1.99; CI usa `@stable`): `#[must_use]` sobre un `Future` ya `#[must_use]`.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Publisher: Send + Sync {
     /// Publish a post. If `feed_template` is provided and non-empty, it
