@@ -25,7 +25,7 @@ test de `auth_routes.rs` con `matches!`, y verificar clippy + test + fmt en verd
 instar dependencias y dejar `pnpm lint` en verde sin tocar la semántica de `src/`.
 - [x] 3. CI: añadir `--all-targets` al job de clippy y crear un job `frontend`
   (pnpm frozen-lockfile + lint + `tsc -b` + vitest) en `.github/workflows/ci.yml`.
-- [ ] 4. Documentar en `docs/quality-gates.md`, archivar este plan y el change de OpenSpec.
+- [x] 4. Documentar en `docs/quality-gates.md`, archivar este plan y el change de OpenSpec.
 
 ## Criterios de aceptación
 - [x] `cargo clippy --all-targets -- -D warnings` sale con 0.
