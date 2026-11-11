@@ -91,7 +91,7 @@ export default function PublisherList() {
       // Fetch OAuth status for connected OAuth publishers
       const oauthTypes = ["X", "LinkedIn", "Threads", "Mastodon"];
       const statusPromises = Object.entries(data.publishers)
-        .filter(([_, entry]) => oauthTypes.includes(entry.type) && entry.config.access_token)
+        .filter(([, entry]) => oauthTypes.includes(entry.type) && entry.config.access_token)
         .map(async ([id]) => {
           try {
             const status = await fetchOAuthStatus(id);
@@ -106,13 +106,14 @@ export default function PublisherList() {
         if (r) statusMap[r[0]] = r[1];
       }
       setOauthStatuses(statusMap);
-    } catch (e) {
+    } catch {
       message.error("Failed to load publishers");
     } finally {
       setLoading(false);
     }
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader flips a synchronous loading flag; a data-fetching refactor is out of scope
   useEffect(() => { loadData(); }, []);
 
   const handleCreate = () => {
@@ -216,7 +217,7 @@ export default function PublisherList() {
   };
 
   /** Check if a publisher has all required fields to be considered "configured". */
-  const isPublisherConfigured = (config: Record<string, any>, type: string): boolean => {
+  const isPublisherConfigured = (config: Record<string, unknown>, type: string): boolean => {
     switch (type) {
       case "Telegram":
         return !!(config.bot_token && config.chat_id);

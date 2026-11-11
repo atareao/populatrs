@@ -10,15 +10,6 @@ const mockSchedule = { cron_expression: "0 */2 * * *", timezone: "Europe/Madrid"
 const mockRetry = { max_retries: 3, base_delay_seconds: 5, max_delay_seconds: 300, backoff_multiplier: 2.0 };
 const mockPublish = { max_posts: 1, min_date: "" };
 
-function mockFetch(status: number, body: unknown) {
-  globalThis.fetch = vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-    text: () => Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)),
-  });
-}
-
 function renderSettings(initialEntries = ["/settings"]) {
   return render(
     <ConfigProvider>
