@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Typography, Tag, Empty, Spin, Table, Tooltip, InputNumber, Button, Dropdown, message,
+  Typography, Tag, Empty, Table, Tooltip, InputNumber, Button, Dropdown, message,
 } from "antd";
 import {
   CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, SaveOutlined, RedoOutlined,
@@ -36,7 +36,7 @@ export default function LogsPage() {
     try {
       const result = await fetchFeedLogs(100, 0);
       setData(result);
-    } catch (e) {
+    } catch {
       message.error("Failed to load feed logs");
     } finally {
       setLoading(false);
@@ -53,6 +53,7 @@ export default function LogsPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadData() flips the loading flag synchronously on mount; a data-fetching refactor is out of scope
     loadData();
     loadRetention();
   }, []);

@@ -5,7 +5,7 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { fetchFeeds, createFeed, updateFeed, deleteFeed, runFeed, dryRunFeed, fetchPublishers, resolveYoutubeUrl, type FeedConfig, type FeedPublisherBinding } from "../../api/http";
 
-const { Title, Text } = Typography;
+const { Title } = Typography;
 
 function generateId(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -45,6 +45,7 @@ export default function FeedList() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader flips a synchronous loading flag; a data-fetching refactor is out of scope
   useEffect(() => { loadData(); }, []);
 
   const handleCreate = () => {
@@ -77,7 +78,7 @@ export default function FeedList() {
       await deleteFeed(id);
       message.success("Feed deleted");
       loadData();
-    } catch (e) {
+    } catch {
       message.error("Failed to delete feed");
     }
   };

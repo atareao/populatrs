@@ -40,6 +40,7 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- check() flips the loading flag synchronously on mount; refactoring to an external store is out of scope
     check();
   }, [check]);
 

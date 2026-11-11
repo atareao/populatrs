@@ -16,6 +16,7 @@ export default function OAuthCallback() {
 
   useEffect(() => {
     if (!code || !state || !publisherId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- missing-params branch must surface an error state on mount by design
       setStatus("error");
       setMessage("Missing OAuth parameters (code, state, or publisher_id)");
       return;

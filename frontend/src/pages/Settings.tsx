@@ -62,10 +62,10 @@ export default function Settings() {
   const [nextRunAt, setNextRunAt] = useState<string | null>(null)
   const [ytForm] = Form.useForm()
   const [schedForm] = Form.useForm()
-  const [retryPolicy, setRetryPolicy] = useState<RetryPolicy | null>(null)
+  const [, setRetryPolicy] = useState<RetryPolicy | null>(null)
   const [retrySaving, setRetrySaving] = useState(false)
   const [retryForm] = Form.useForm()
-  const [publishSettings, setPublishSettings] = useState<PublishSettings | null>(null)
+  const [, setPublishSettings] = useState<PublishSettings | null>(null)
   const [publishSaving, setPublishSaving] = useState(false)
   const [publishForm] = Form.useForm()
 
