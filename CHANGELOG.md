@@ -1,4 +1,37 @@
 # Changelog
+## [0.4.25] - 2026-11-11
+
+### Documentation
+
+- Archive PLAN-002 and refresh handoff after #78
+## [0.4.24] - 2026-11-11
+
+### Documentation
+
+- Documentar fix de vulnerabilidades y sincronizar development con main
+- *(handoff)* Reflejar PR #79 fusionado y priorizar arreglo del GH_TOKEN
+- *(openspec)* Add quality-gates change and spec (#78)
+- Document quality gates (#78)
+
+### Miscellaneous Tasks
+
+- *(backend)* Sync Cargo.lock with version 0.4.23
+- *(frontend)* Add eslint flat config and lint script
+- Run clippy --all-targets and add frontend job
+- Release v0.4.24
+
+### Styling
+
+- *(frontend)* Fix lint violations without behavior change
+
+### Testing
+
+- *(ci)* Use matches! in state mismatch check to satisfy clippy --all-targets
+## [0.4.23] - 2026-11-11
+
+### Miscellaneous Tasks
+
+- Release v0.4.23
 ## [0.4.22] - 2026-11-02
 
 ### Bug Fixes
