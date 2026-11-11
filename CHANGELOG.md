@@ -1,4 +1,9 @@
 # Changelog
+## [0.4.25] - 2026-11-11
+
+### Documentation
+
+- Archive PLAN-002 and refresh handoff after #78
 ## [0.4.24] - 2026-11-11
 
 ### Documentation
@@ -13,6 +18,7 @@
 - *(backend)* Sync Cargo.lock with version 0.4.23
 - *(frontend)* Add eslint flat config and lint script
 - Run clippy --all-targets and add frontend job
+- Release v0.4.24
 
 ### Styling
 
