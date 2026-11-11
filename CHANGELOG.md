@@ -9,6 +9,10 @@
 
 - *(agents)* Poda del AGENTS.md (−72,6 %) y extracción del detalle a docs/
 - *(agents)* Añade la sección Git Flow
+
+### Miscellaneous Tasks
+
+- Release v0.4.22
 ## [0.4.21] - 2026-10-01
 
 ### Bug Fixes
