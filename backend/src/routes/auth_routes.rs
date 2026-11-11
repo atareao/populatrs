@@ -864,10 +864,7 @@ mod tests {
             "verifier456".to_string(),
             std::time::Instant::now(),
         ));
-        let is_mismatch = match (&cb_state, &stored) {
-            (Some(cb), Some((ref stored_state, _, _))) if stored_state == cb => false,
-            _ => true,
-        };
+        let is_mismatch = !matches!((&cb_state, &stored), (Some(cb), Some((ref stored_state, _, _))) if stored_state == cb);
         assert!(is_mismatch);
     }
 
