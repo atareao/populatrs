@@ -1,9 +1,18 @@
 # Changelog
+## [0.4.26] - 2026-11-13
+
+### Documentation
+
+- Añado licencia MIT
 ## [0.4.25] - 2026-11-11
 
 ### Documentation
 
 - Archive PLAN-002 and refresh handoff after #78
+
+### Miscellaneous Tasks
+
+- Release v0.4.25
 ## [0.4.24] - 2026-11-11
 
 ### Documentation
